@@ -164,7 +164,7 @@
 //! }
 //! ```
 
-use embedded_hal::i2c::{Operation, SevenBitAddress};
+use embedded_hal::i2c::{ErrorType, Operation, SevenBitAddress};
 use openprot_hal_blocking::i2c_hardware::{I2cHardwareCore, I2cMaster};
 
 /// Mock error type for I2C operations
@@ -432,8 +432,11 @@ impl Default for MockI2cHardware {
     }
 }
 
-impl I2cHardwareCore for MockI2cHardware {
+impl ErrorType for MockI2cHardware {
     type Error = MockI2cError;
+}
+
+impl I2cHardwareCore for MockI2cHardware {
     type Config = MockI2cConfig;
     type I2cSpeed = u32; // Speed in Hz
     type TimingConfig = (); // No timing config needed for mock
@@ -1022,6 +1025,10 @@ where
     }
 }
 
+impl<S> ErrorType for MockI2cHardwareWithSystem<S> {
+    type Error = MockI2cError;
+}
+
 impl<S> I2cHardwareCore for MockI2cHardwareWithSystem<S>
 where
     S: openprot_hal_blocking::system_control::SystemControl<
@@ -1029,7 +1036,6 @@ where
         ResetId = crate::system_control::MockResetId,
     >,
 {
-    type Error = MockI2cError;
     type Config = MockI2cConfig;
     type I2cSpeed = u32;
     type TimingConfig = ();

@@ -33,15 +33,19 @@
 //!
 //! For non-blocking slave operations, see `openprot-hal-nb::i2c_hardware`.
 
-use embedded_hal::i2c::{AddressMode, Operation, SevenBitAddress};
+use embedded_hal::i2c::{AddressMode, ErrorType, Operation, SevenBitAddress};
 
 /// Core I2C hardware interface providing basic operations
 ///
 /// This is the foundation trait that all I2C hardware implementations must provide.
 /// It contains only the most basic operations needed for any I2C controller.
-pub trait I2cHardwareCore {
-    /// Hardware-specific error type that implements embedded-hal error traits
-    type Error: embedded_hal::i2c::Error + core::fmt::Debug;
+///
+/// The associated error type comes from [`embedded_hal::i2c::ErrorType`] — the
+/// same minimal error-type base embedded-hal itself layers capability traits
+/// on (and that `i2c_device::I2CCoreTarget` already uses). Capability traits
+/// (`I2cSlaveCore`, …) depend only on `ErrorType`, **not** on this whole
+/// init/timing/recover contract.
+pub trait I2cHardwareCore: ErrorType {
 
     /// Hardware-specific configuration type for I2C initialization and setup
     type Config;
@@ -160,7 +164,11 @@ pub mod slave {
     /// This trait provides the fundamental slave operations that all slave
     /// implementations need: setting slave address and enabling/disabling slave mode.
     /// This is the minimal trait for any I2C slave implementation.
-    pub trait I2cSlaveCore<A: AddressMode = SevenBitAddress>: super::I2cHardwareCore {
+    // Slave operation needs only an error type, not the full
+    // init/timing/recover contract — mirrors embedded-hal's own
+    // `I2c: ErrorType` layering. (Previously `: super::I2cHardwareCore`,
+    // which wrongly forced every slave impl to also be a full controller.)
+    pub trait I2cSlaveCore<A: AddressMode = SevenBitAddress>: super::ErrorType {
         /// Configure the slave address for this I2C controller
         fn configure_slave_address(&mut self, addr: A) -> Result<(), Self::Error>;
 
