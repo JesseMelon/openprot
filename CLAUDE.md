@@ -3,6 +3,12 @@
 
 # Repo agent context
 
+## Git conventions (repo-wide)
+
+- **Do NOT add `Co-Authored-By: Claude …` trailers** to commit messages.
+- **Do NOT add "🤖 Generated with Claude Code"** (or similar attribution) to
+  commit messages or PR bodies.
+
 Pointers to scoped, auto-loaded context. Read the relevant one before
 working in that area.
 
