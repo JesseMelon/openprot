@@ -314,10 +314,14 @@ fn run_i2c_init_smoke_test() -> Result<(), &'static str> {
 
     let board = Ast10x0Board::new(Ast10x0BoardDescriptor {
         pinctrl_groups: &[pinctrl::PINCTRL_I2C1],
+        // Empty: this test drives per-controller `Ast1060I2c::new()` itself
+        // (in `run_init_case`) and verifies the registers, so the board must
+        // not also bring the controller up.
+        i2c_buses: &[],
     });
 
     // SAFETY: Test target runs once at boot with exclusive access to the board.
-    unsafe { board.init() };
+    unsafe { board.init() }.map_err(|_| ERR_INIT_FAILED)?;
     pw_log::info!("Board-level I2C global init complete");
 
     run_init_case(
