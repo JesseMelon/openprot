@@ -25,6 +25,19 @@ blocking `wait_for_messages` + timeouts; the `system.json5`/app wiring +
 MCTP-server integration that actually consumes the `USER` wake; host-modeled
 IRQ (notification path is QEMU-verified only, by decision).
 
+## Confined-`unsafe` MMIO Façade (pattern conformance)
+
+`target/ast10x0/peripherals/i2c` now has `Ast1060I2cRegisters` (`registers.rs`)
+— the single `unsafe fn` MMIO gate + sole `unsafe` derefs; `Ast1060I2c` holds
+it and its constructors are safe. **Checklist 5/6** (commit `ae83bcf`).
+**Item 3 NOT done:** whole-register `unsafe { w.bits() }` writes and
+`&RegisterBlock` PAC types still flow to `controller/master/slave/transfer/
+timing` (~140 sites). Confining those into intent-named façade verbs is a
+large, **parity-sensitive** migration with **no host test** (i2c is
+QEMU/HW-verified only) — deliberately staged as its own on-target-verified
+effort, not rushed blind. Do NOT claim full pattern conformance until item 3
+lands with QEMU verification.
+
 ## Locked decisions (do not re-litigate)
 
 - Consumer seam = `embedded_hal::i2c::I2c` **verbatim**. No `BusIndex`.
