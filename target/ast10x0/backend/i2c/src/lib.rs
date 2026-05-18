@@ -42,7 +42,7 @@
 use ast1060_pac::{i2c::RegisterBlock, i2cbuff::RegisterBlock as BuffRegisterBlock};
 
 pub use ast10x0_peripherals::i2c::{
-    Ast1060I2c, ClockConfig, I2cConfig, I2cError, I2cSpeed, I2cXferMode,
+    Ast1060I2c, Ast1060I2cRegisters, ClockConfig, I2cConfig, I2cError, I2cSpeed, I2cXferMode,
 };
 
 /// The yield closure type stored in every bus driver.
@@ -109,9 +109,11 @@ fn regs_for(bus: u8) -> Option<(*const RegisterBlock, *const BuffRegisterBlock)>
 /// must be `<= MAX_BUS`.
 pub unsafe fn init_bus(bus: u8, config: &I2cConfig) -> Result<(), I2cError> {
     let (regs, buff) = regs_for(bus).ok_or(I2cError::Invalid)?;
-    // SAFETY: pointers come from the PAC for controller `bus`; caller upholds
-    // exclusive access and prior subsystem init.
-    let mut i2c = unsafe { Ast1060I2c::from_initialized(regs, buff, config, spin as Yield) };
+    // SAFETY: the single MMIO-pointer perimeter — PAC pointers for the same
+    // controller `bus`, valid for the program; caller upholds exclusive
+    // access and prior subsystem init.
+    let mmio = unsafe { Ast1060I2cRegisters::new(regs, buff) };
+    let mut i2c = Ast1060I2c::from_initialized(mmio, config, spin as Yield);
     i2c.init_hardware(config)
 }
 
@@ -140,9 +142,10 @@ pub unsafe fn init_bus(bus: u8, config: &I2cConfig) -> Result<(), I2cError> {
 /// must be `<= MAX_BUS`.
 pub unsafe fn open_bus(bus: u8, config: &I2cConfig) -> Result<BusDriver, I2cError> {
     let (regs, buff) = regs_for(bus).ok_or(I2cError::Invalid)?;
-    // SAFETY: pointers come from the PAC for controller `bus`; caller upholds
-    // exclusive ownership and prior board init (incl. `init_bus`).
-    Ok(unsafe { Ast1060I2c::from_initialized(regs, buff, config, spin as Yield) })
+    // SAFETY: single MMIO-pointer perimeter; caller upholds exclusive
+    // ownership and prior board init (incl. `init_bus`).
+    let mmio = unsafe { Ast1060I2cRegisters::new(regs, buff) };
+    Ok(Ast1060I2c::from_initialized(mmio, config, spin as Yield))
 }
 
 /// Open a DmaMode controller the board has already initialized, attaching a
@@ -164,6 +167,8 @@ pub unsafe fn open_bus_dma(
     dma_buf: &'static mut [u8],
 ) -> Result<BusDriver, I2cError> {
     let (regs, buff) = regs_for(bus).ok_or(I2cError::Invalid)?;
-    // SAFETY: see above; `dma_buf` non-cached + uniquely owned per the contract.
-    Ok(unsafe { Ast1060I2c::from_initialized_with_dma(regs, buff, config, dma_buf, spin as Yield) })
+    // SAFETY: single MMIO-pointer perimeter; `dma_buf` non-cached + uniquely
+    // owned per the contract.
+    let mmio = unsafe { Ast1060I2cRegisters::new(regs, buff) };
+    Ok(Ast1060I2c::from_initialized_with_dma(mmio, config, dma_buf, spin as Yield))
 }

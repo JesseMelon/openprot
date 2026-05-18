@@ -6,7 +6,7 @@
 
 use ast10x0_board::{Ast10x0Board, Ast10x0BoardDescriptor};
 use ast10x0_peripherals::i2c::{
-    Ast1060I2c, ClockConfig, I2cConfig, I2cError, I2cSpeed, I2cXferMode,
+    Ast1060I2c, Ast1060I2cRegisters, ClockConfig, I2cConfig, I2cError, I2cSpeed, I2cXferMode,
 };
 use ast10x0_peripherals::scu::pinctrl;
 use codegen as _;
@@ -376,16 +376,12 @@ fn run_i2c_init_smoke_test() -> Result<(), &'static str> {
 fn run_init_case(name: &str, config: I2cConfig) -> Result<(), &'static str> {
     pw_log::info!("Instantiating controller 1 in {} mode", name as &str);
 
-    // SAFETY: The test owns the controller for the process lifetime and uses
-    // the matching I2C/I2CBUFF register pair for controller 1.
-    let result = unsafe {
-        Ast1060I2c::new(
-            ast1060_pac::I2c1::ptr(),
-            ast1060_pac::I2cbuff1::ptr(),
-            &config,
-            |_| core::hint::spin_loop(),
-        )
+    // SAFETY: single MMIO-pointer perimeter — the test owns controller 1 for
+    // the process lifetime and pairs its matching I2C/I2CBUFF blocks.
+    let mmio = unsafe {
+        Ast1060I2cRegisters::new(ast1060_pac::I2c1::ptr(), ast1060_pac::I2cbuff1::ptr())
     };
+    let result = Ast1060I2c::new(mmio, &config, |_| core::hint::spin_loop());
 
     match result {
         Ok(_i2c) => {
@@ -414,17 +410,12 @@ fn run_init_case_dma(name: &str, config: I2cConfig) -> Result<(), &'static str> 
 
     let mut dma_buf = [0u8; 64];
 
-    // SAFETY: The test owns the controller for the process lifetime and uses
-    // the matching I2C/I2CBUFF register pair for controller 1.
-    let result = unsafe {
-        Ast1060I2c::new_with_dma(
-            ast1060_pac::I2c1::ptr(),
-            ast1060_pac::I2cbuff1::ptr(),
-            &config,
-            &mut dma_buf,
-            |_| core::hint::spin_loop(),
-        )
+    // SAFETY: single MMIO-pointer perimeter — the test owns controller 1 for
+    // the process lifetime and pairs its matching I2C/I2CBUFF blocks.
+    let mmio = unsafe {
+        Ast1060I2cRegisters::new(ast1060_pac::I2c1::ptr(), ast1060_pac::I2cbuff1::ptr())
     };
+    let result = Ast1060I2c::new_with_dma(mmio, &config, &mut dma_buf, |_| core::hint::spin_loop());
 
     match result {
         Ok(_i2c) => {

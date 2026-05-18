@@ -18,6 +18,7 @@ rust_library(
         "i2c/master.rs",
         "i2c/mod.rs",
         "i2c/recovery.rs",
+        "i2c/registers.rs",
         "i2c/slave.rs",
         "i2c/target_adapter.rs",
         "i2c/timing.rs",
