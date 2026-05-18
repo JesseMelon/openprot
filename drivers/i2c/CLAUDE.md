@@ -8,15 +8,22 @@ reconstruction of the working memory for this effort (the `~/.claude` memory
 is machine-local and does not travel). Human-facing rationale:
 `drivers/i2c/README.md` and `ASSESSMENT-stack-facade-template.md` (repo root).
 
-## Status — NOT complete
+## Status — slave-RX notification slice landed; still not demo-complete
 
-Master-only milestone (commit "i2c: layered userspace driver"). The
-fully-functional **ocp-emea demo still needs i2c slave/target behavior +
-notifications** brought in. Currently scoped out on purpose: the wire
-protocol (`api/src/protocol.rs`) carries only `Transaction`, no slave ops, no
-IRQ. Slave RX + notification — cf. the `ocp-emea-demo-stack-facade` clone's
-`I2C2_IRQ` / `drain_slave_rx` / `raise_peer_user_signal` — is the next chunk
-of real work, not a deferred nicety.
+Done: master `Transaction` path, **and** the thin slave-RX notification
+vertical slice — wire ops `ConfigureSlave`/`EnableSlave`/`DisableSlave`/
+`EnableSlaveNotification`/`DisableSlaveNotification`/`SlaveReceive`; the IRQ
+→ drain → per-bus latch → `object_set_peer_user_signal(USER)` path in
+`server-runtime`; client target methods (`configure_slave`/`enable_slave`/
+`enable_notification`/`slave_receive`/…). Seam = `openprot_hal_blocking::
+i2c_hardware::slave` (reused, after the I2cHardwareCore→ErrorType trait fix,
+commit `3add2ff`).
+
+Still deferred for the full ocp-emea demo (do NOT assume present):
+slave TX / `ReadRequest` / `slave_set_response`; multi-message queue;
+blocking `wait_for_messages` + timeouts; the `system.json5`/app wiring +
+MCTP-server integration that actually consumes the `USER` wake; host-modeled
+IRQ (notification path is QEMU-verified only, by decision).
 
 ## Locked decisions (do not re-litigate)
 

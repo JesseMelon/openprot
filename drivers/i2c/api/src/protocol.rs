@@ -31,8 +31,30 @@ pub const MAX_OPS: usize = 16;
 #[repr(u8)]
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum I2cOp {
-    /// One whole `I2c::transaction(address, &mut [Operation])`.
+    /// One whole `I2c::transaction(address, &mut [Operation])`. Master mode.
     Transaction = 0x01,
+
+    // ---- Target/slave mode (thin notification slice) ----
+    // One IPC channel per bus, so none of these carry a bus field: the
+    // server-runtime knows the bus from the channel the request arrived on
+    // (same invariant as master). All use `I2cRequestHeader`; field meanings
+    // are noted per op below.
+    /// Set this bus's slave address. `address` = 7-bit slave address.
+    ConfigureSlave = 0x02,
+    /// Enter slave mode on this bus. No args.
+    EnableSlave = 0x03,
+    /// Leave slave mode on this bus. No args.
+    DisableSlave = 0x04,
+    /// Arm interrupt-driven slave-RX notification for this bus. No args.
+    /// After this, the server raises `Signals::USER` on the bus channel when
+    /// slave data has been latched.
+    EnableSlaveNotification = 0x05,
+    /// Disarm slave-RX notification for this bus. No args.
+    DisableSlaveNotification = 0x06,
+    /// Fetch the latched slave-RX buffer (non-blocking). `op_count` = caller's
+    /// max byte count. Response payload = received bytes; status `NoData` if
+    /// nothing is latched.
+    SlaveReceive = 0x07,
 }
 
 impl TryFrom<u8> for I2cOp {
@@ -41,6 +63,12 @@ impl TryFrom<u8> for I2cOp {
     fn try_from(value: u8) -> Result<Self, Self::Error> {
         match value {
             0x01 => Ok(Self::Transaction),
+            0x02 => Ok(Self::ConfigureSlave),
+            0x03 => Ok(Self::EnableSlave),
+            0x04 => Ok(Self::DisableSlave),
+            0x05 => Ok(Self::EnableSlaveNotification),
+            0x06 => Ok(Self::DisableSlaveNotification),
+            0x07 => Ok(Self::SlaveReceive),
             _ => Err(I2cError::InvalidOperation),
         }
     }
@@ -87,6 +115,8 @@ pub enum I2cError {
     Bus = 0x08,
     Overrun = 0x09,
     Timeout = 0x0A,
+    /// `SlaveReceive` found nothing latched (no slave data pending).
+    NoData = 0x0B,
     InternalError = 0xFF,
 }
 
@@ -104,6 +134,7 @@ impl From<u8> for I2cError {
             0x08 => Self::Bus,
             0x09 => Self::Overrun,
             0x0A => Self::Timeout,
+            0x0B => Self::NoData,
             _ => Self::InternalError,
         }
     }
@@ -270,12 +301,53 @@ mod tests {
 
     #[test]
     fn error_and_op_byte_mapping_is_stable() {
-        for raw in 0u8..=0x0A {
+        for raw in 0u8..=0x0B {
             assert_eq!(I2cError::from(raw) as u8, raw);
         }
+        assert_eq!(I2cError::from(0x0B), I2cError::NoData);
         assert_eq!(I2cError::from(0xFF), I2cError::InternalError);
         assert_eq!(I2cError::from(0x42), I2cError::InternalError);
         assert_eq!(I2cOp::try_from(0x01), Ok(I2cOp::Transaction));
         assert_eq!(I2cOp::try_from(0x99), Err(I2cError::InvalidOperation));
+    }
+
+    #[test]
+    fn slave_opcodes_roundtrip() {
+        for (raw, op) in [
+            (0x02u8, I2cOp::ConfigureSlave),
+            (0x03, I2cOp::EnableSlave),
+            (0x04, I2cOp::DisableSlave),
+            (0x05, I2cOp::EnableSlaveNotification),
+            (0x06, I2cOp::DisableSlaveNotification),
+            (0x07, I2cOp::SlaveReceive),
+        ] {
+            assert_eq!(I2cOp::try_from(raw), Ok(op));
+            assert_eq!(op as u8, raw);
+        }
+    }
+
+    #[test]
+    fn configure_slave_header_carries_address() {
+        // ConfigureSlave: address field = 7-bit slave address, no payload.
+        let h = I2cRequestHeader::new(I2cOp::ConfigureSlave, 0x39, 0, 0);
+        let h = I2cRequestHeader::ref_from_bytes(h.as_bytes()).unwrap();
+        assert_eq!(h.operation(), Ok(I2cOp::ConfigureSlave));
+        assert_eq!(h.address_value(), 0x39);
+        assert_eq!(h.payload_length(), 0);
+    }
+
+    #[test]
+    fn slave_receive_header_carries_max_len_in_op_count() {
+        // SlaveReceive: op_count field = caller's max RX length.
+        let h = I2cRequestHeader::new(I2cOp::SlaveReceive, 0, 64, 0);
+        let h = I2cRequestHeader::ref_from_bytes(h.as_bytes()).unwrap();
+        assert_eq!(h.operation(), Ok(I2cOp::SlaveReceive));
+        assert_eq!(h.op_count_value(), 64);
+
+        // NoData status round-trips for the empty-latch case.
+        let nd = I2cResponseHeader::error(I2cError::NoData);
+        let nd = I2cResponseHeader::ref_from_bytes(nd.as_bytes()).unwrap();
+        assert!(!nd.is_success());
+        assert_eq!(nd.error_code(), I2cError::NoData);
     }
 }

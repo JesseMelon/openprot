@@ -14,6 +14,7 @@ rust_library(
     edition = "2024",
     visibility = ["//visibility:public"],
     deps = [
+        "//hal/blocking:blocking",
         "@rust_crates//:embedded-hal",
         "@rust_crates//:zerocopy",
     ],

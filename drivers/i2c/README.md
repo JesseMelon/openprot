@@ -76,17 +76,32 @@ Server binary (no in-repo precedent yet — the runtime is a library, as with
    `#[link_section=".ram_nc"]`). `&cfg` must be the **same** descriptor entry
    the board used.
 3. build `&mut [i2c_server_runtime::Bus::new(handle::I2C_n, driver_n), …]`;
-4. `i2c_server_runtime::run(handle::WG, buses)`.
+4. `i2c_server_runtime::run(handle::WG, handle::I2C_IRQ, signals::I2C, buses)`
+   — the runtime also registers the i2c IRQ; on it, drains every
+   notification-armed bus's slave RX into a per-bus latch and raises
+   `Signals::USER` on that bus's channel.
 
-The matching `system.json5` declares one `channel_handler` per bus (plus one
-`wait_group`). Deferred until a concrete board target needs it — not
-fabricated speculatively.
+The matching `system.json5` declares one `channel_handler` per bus, the i2c
+interrupt object, and one `wait_group`. Deferred until a concrete board
+target needs it — not fabricated speculatively.
+
+## Slave-RX notification (thin slice)
+
+Client (target side, same bus channel): `configure_slave(addr)` →
+`enable_slave()` → `enable_notification()`; then on a `Signals::USER` wake on
+the channel, `slave_receive(&mut buf)` (returns `NoData` if nothing latched).
+Seam = `openprot_hal_blocking::i2c_hardware::slave` (`I2cSlaveCore`/`Buffer`),
+reused after correcting its `I2cHardwareCore` supertrait to `ErrorType`.
+Deferred: slave TX/`ReadRequest`, multi-message queue, blocking/timeout, the
+`system.json5`/app + MCTP-consumer integration. The IRQ→USER path is
+QEMU-verified only (by decision); host tests cover the wire codec + dispatch.
 
 ## Status
 
 Host tests (`bazel test`, no kernel/QEMU): `//drivers/i2c/api:i2c_api_test`
-(wire codec), `//drivers/i2c/server:i2c_server_test` (dispatch + error map),
+(wire codec incl. slave ops), `//drivers/i2c/server:i2c_server_test`
+(`dispatch` + `dispatch_slave` + error map),
 `//drivers/i2c/tests:i2c_loopback_test` (end-to-end client↔server marshalling).
-Kernel/ARM crates build under `--config=virt_ast10x0`; the `ast1060_pac`
-instance-name assumption (`I2c`/`I2c1..13`, `I2cbuff`/`I2cbuff1..13`) is
-**confirmed** — `i2c_backend_ast10x0` + `ast10x0_board` compiled clean.
+Full kernel/ARM stack incl. the slave/notification path and the `i2c_init:i2c`
+system image build under `--config=virt_ast10x0`; the `ast1060_pac`
+instance-name assumption is **confirmed** (crates compiled clean).

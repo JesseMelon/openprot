@@ -4,8 +4,10 @@
 load("@rules_rust//rust:defs.bzl", "rust_library")
 load("//target/ast10x0:defs.bzl", "TARGET_COMPATIBLE_WITH")
 
-# The single kernel-tagged server crate: wraps i2c_server::dispatch in the
-# Pigweed WaitGroup wait/read/respond loop. One IPC channel per bus.
+# The single kernel-tagged server crate: wraps i2c_server::{dispatch,
+# slave::dispatch_slave} in the Pigweed WaitGroup loop and adds the per-bus
+# slave-RX notification latch + IRQ->USER wake. One IPC channel per bus.
+# Slave/notification logic is verified on-target (QEMU), not host.
 rust_library(
     name = "i2c_server_runtime",
     srcs = ["src/lib.rs"],
@@ -17,5 +19,6 @@ rust_library(
         "//drivers/i2c/api:i2c_api",
         "//drivers/i2c/server:i2c_server",
         "@pigweed//pw_kernel/userspace",
+        "@rust_crates//:zerocopy",
     ],
 )

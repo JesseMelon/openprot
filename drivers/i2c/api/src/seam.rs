@@ -18,6 +18,15 @@ pub use embedded_hal::i2c::{
     SevenBitAddress, TenBitAddress,
 };
 
+// The **target/slave seam** is reused verbatim from `openprot-hal-blocking`
+// — same principle as the master seam above: do not reinvent. The
+// server-runtime is generic over these (configure address / enable / drain);
+// the per-target backend implements them by delegating to the SoC driver.
+pub use openprot_hal_blocking::i2c_hardware::slave::{
+    I2cSEvent, I2cSlaveBuffer, I2cSlaveCore, I2cSlaveInterrupts, SlaveStatus,
+};
+pub use openprot_hal_blocking::i2c_hardware::I2cHardwareCore;
+
 use crate::protocol::I2cError;
 
 /// Map a wire status code onto the `embedded_hal::i2c::ErrorKind` taxonomy so

@@ -62,6 +62,7 @@ mod controller;
 mod error;
 mod global;
 mod hal_impl;
+mod hal_slave_impl;
 mod master;
 mod recovery;
 mod slave;

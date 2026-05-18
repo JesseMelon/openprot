@@ -22,6 +22,7 @@
 #![no_std]
 
 pub mod loopback;
+pub mod slave;
 
 use i2c_api::seam::{ErrorKind, I2c, I2cBusError, NoAcknowledgeSource, Operation, SevenBitAddress};
 use i2c_api::{
@@ -35,7 +36,7 @@ pub const MAX_BUF_SIZE: usize = 512;
 
 /// Map the embedded-hal error taxonomy onto the wire status code. The server
 /// stays decoupled from any concrete backend: it only needs `B::Error: Error`.
-fn kind_to_wire(kind: ErrorKind) -> I2cError {
+pub(crate) fn kind_to_wire(kind: ErrorKind) -> I2cError {
     match kind {
         ErrorKind::NoAcknowledge(NoAcknowledgeSource::Address) => I2cError::AddressNack,
         ErrorKind::NoAcknowledge(NoAcknowledgeSource::Data) => I2cError::DataNack,
@@ -47,10 +48,18 @@ fn kind_to_wire(kind: ErrorKind) -> I2cError {
     }
 }
 
-fn encode_error(response: &mut [u8], err: I2cError) -> usize {
+pub(crate) fn encode_error(response: &mut [u8], err: I2cError) -> usize {
     let hdr = I2cResponseHeader::error(err);
     response[..I2cResponseHeader::SIZE].copy_from_slice(zerocopy::IntoBytes::as_bytes(&hdr));
     I2cResponseHeader::SIZE
+}
+
+/// Success header with `payload_len` bytes already placed at
+/// `response[I2cResponseHeader::SIZE..]` by the caller (0 for ack-only).
+pub(crate) fn encode_ok(response: &mut [u8], payload_len: usize) -> usize {
+    let hdr = I2cResponseHeader::success(payload_len as u16);
+    response[..I2cResponseHeader::SIZE].copy_from_slice(zerocopy::IntoBytes::as_bytes(&hdr));
+    I2cResponseHeader::SIZE + payload_len
 }
 
 /// Decode one wire request, replay it on `bus` as a single

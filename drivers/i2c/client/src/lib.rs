@@ -66,6 +66,89 @@ impl<T: Transport> I2cClient<T> {
         Self { transport }
     }
 
+    // ---- Target/slave mode (thin notification slice) ----
+    //
+    // One IPC channel per bus, so none of these carry a bus argument — the
+    // bus is the channel this client is bound to. Same Transport, same
+    // marshalling discipline as master: one whole request, one round-trip.
+
+    /// Send a header-only slave-control op; returns the response payload
+    /// length (0 for ack-only ops). `out` receives `SlaveReceive` data.
+    fn slave_cmd(
+        &mut self,
+        op: I2cOp,
+        address: u16,
+        max_len: u16,
+        out: Option<&mut [u8]>,
+    ) -> Result<usize, ClientError> {
+        let hdr = I2cRequestHeader::new(op, address, max_len, 0);
+        let mut req = [0u8; I2cRequestHeader::SIZE];
+        req.copy_from_slice(zerocopy::IntoBytes::as_bytes(&hdr));
+
+        let mut resp = [0u8; I2cResponseHeader::SIZE + MAX_PAYLOAD_SIZE];
+        let resp_len = self.transport.transact(&req, &mut resp)?;
+
+        if resp_len < I2cResponseHeader::SIZE {
+            return Err(ClientError::InvalidResponse);
+        }
+        let Some(rhdr) =
+            zerocopy::Ref::<_, I2cResponseHeader>::from_bytes(&resp[..I2cResponseHeader::SIZE]).ok()
+        else {
+            return Err(ClientError::InvalidResponse);
+        };
+        if !rhdr.is_success() {
+            return Err(ClientError::ServerError(rhdr.error_code()));
+        }
+        let n = rhdr.payload_length();
+        if resp_len < I2cResponseHeader::SIZE + n {
+            return Err(ClientError::InvalidResponse);
+        }
+        if let Some(buf) = out {
+            let copy = n.min(buf.len());
+            buf[..copy].copy_from_slice(&resp[I2cResponseHeader::SIZE..I2cResponseHeader::SIZE + copy]);
+            return Ok(copy);
+        }
+        Ok(n)
+    }
+
+    /// Set this bus's slave (target) address.
+    pub fn configure_slave(&mut self, address: SevenBitAddress) -> Result<(), ClientError> {
+        self.slave_cmd(I2cOp::ConfigureSlave, address as u16, 0, None)
+            .map(|_| ())
+    }
+
+    /// Enter slave mode (start ACKing the configured address).
+    pub fn enable_slave(&mut self) -> Result<(), ClientError> {
+        self.slave_cmd(I2cOp::EnableSlave, 0, 0, None).map(|_| ())
+    }
+
+    /// Leave slave mode.
+    pub fn disable_slave(&mut self) -> Result<(), ClientError> {
+        self.slave_cmd(I2cOp::DisableSlave, 0, 0, None).map(|_| ())
+    }
+
+    /// Arm interrupt-driven slave-RX notification. After this the server
+    /// raises `Signals::USER` on this bus's channel when data is latched;
+    /// the consumer then calls [`slave_receive`](Self::slave_receive).
+    pub fn enable_notification(&mut self) -> Result<(), ClientError> {
+        self.slave_cmd(I2cOp::EnableSlaveNotification, 0, 0, None)
+            .map(|_| ())
+    }
+
+    /// Disarm slave-RX notification (also drops any latched buffer).
+    pub fn disable_notification(&mut self) -> Result<(), ClientError> {
+        self.slave_cmd(I2cOp::DisableSlaveNotification, 0, 0, None)
+            .map(|_| ())
+    }
+
+    /// Fetch the latched slave-RX bytes into `buf` (non-blocking). Returns
+    /// the byte count, or `Err(ServerError(I2cError::NoData))` if nothing is
+    /// pending — call this after a `Signals::USER` wake on the channel.
+    pub fn slave_receive(&mut self, buf: &mut [u8]) -> Result<usize, ClientError> {
+        let max = buf.len().min(MAX_PAYLOAD_SIZE) as u16;
+        self.slave_cmd(I2cOp::SlaveReceive, 0, max, Some(buf))
+    }
+
     fn transact(
         &mut self,
         address: SevenBitAddress,
