@@ -149,6 +149,33 @@ impl<T: Transport> I2cClient<T> {
         self.slave_cmd(I2cOp::SlaveReceive, 0, max, Some(buf))
     }
 
+    /// Pre-load the slave TX buffer so the hardware can respond immediately
+    /// when the master reads from our slave address.
+    ///
+    /// NOTE: not required for MCTP-over-I2C. Provided for testing slave-TX
+    /// and register-echo patterns only.
+    pub fn slave_set_response(&mut self, data: &[u8]) -> Result<(), ClientError> {
+        let hdr = I2cRequestHeader::new(I2cOp::SlaveSetResponse, 0, 0, data.len() as u16);
+        let req_len = I2cRequestHeader::SIZE + data.len();
+        if req_len > MAX_BUF_SIZE {
+            return Err(ClientError::BufferTooSmall);
+        }
+        let mut req = [0u8; MAX_BUF_SIZE];
+        req[..I2cRequestHeader::SIZE].copy_from_slice(zerocopy::IntoBytes::as_bytes(&hdr));
+        req[I2cRequestHeader::SIZE..req_len].copy_from_slice(data);
+        let mut resp = [0u8; I2cResponseHeader::SIZE];
+        let resp_len = self.transport.transact(&req[..req_len], &mut resp)?;
+        if resp_len < I2cResponseHeader::SIZE {
+            return Err(ClientError::InvalidResponse);
+        }
+        let Some(rhdr) =
+            zerocopy::Ref::<_, I2cResponseHeader>::from_bytes(&resp[..I2cResponseHeader::SIZE]).ok()
+        else {
+            return Err(ClientError::InvalidResponse);
+        };
+        if rhdr.is_success() { Ok(()) } else { Err(ClientError::ServerError(rhdr.error_code())) }
+    }
+
     fn transact(
         &mut self,
         address: SevenBitAddress,

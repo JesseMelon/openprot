@@ -55,6 +55,14 @@ pub enum I2cOp {
     /// max byte count. Response payload = received bytes; status `NoData` if
     /// nothing is latched.
     SlaveReceive = 0x07,
+    /// Pre-load the slave TX buffer for the next master read.
+    /// `write_len` bytes from the request payload are written into the
+    /// hardware TX buffer. The data is sent when the master issues a read
+    /// to our slave address.
+    ///
+    /// NOTE: not required for MCTP-over-I2C (master-write only). Provided
+    /// for completeness and testing of slave-TX / register-echo patterns.
+    SlaveSetResponse = 0x08,
 }
 
 impl TryFrom<u8> for I2cOp {
@@ -69,6 +77,7 @@ impl TryFrom<u8> for I2cOp {
             0x05 => Ok(Self::EnableSlaveNotification),
             0x06 => Ok(Self::DisableSlaveNotification),
             0x07 => Ok(Self::SlaveReceive),
+            0x08 => Ok(Self::SlaveSetResponse),
             _ => Err(I2cError::InvalidOperation),
         }
     }

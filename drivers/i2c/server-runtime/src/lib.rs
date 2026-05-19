@@ -161,6 +161,19 @@ where
                     encode_ok(&mut response_buf, n)
                 }
             }
+            // NOTE: not needed for MCTP (master-write only). For testing slave-TX patterns.
+            Some((I2cOp::SlaveSetResponse, _)) => {
+                let hdr_end = I2cRequestHeader::SIZE;
+                if req.len() < hdr_end {
+                    encode_error(&mut response_buf, I2cError::InvalidOperation)
+                } else {
+                    let payload = &req[hdr_end..];
+                    match bus.driver.write_slave_response(payload) {
+                        Ok(()) => encode_ok(&mut response_buf, 0),
+                        Err(_) => encode_error(&mut response_buf, I2cError::InternalError),
+                    }
+                }
+            }
             None => encode_error(&mut response_buf, I2cError::InvalidOperation),
         };
         let _ = syscall::channel_respond(channel, &response_buf[..resp_len]);
