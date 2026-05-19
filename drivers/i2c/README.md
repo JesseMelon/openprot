@@ -34,10 +34,10 @@ SoC-specific backend is the **only** crate that does, so it lives under
 |-------|--------------|-------|------|
 | `api` | `//drivers/i2c/api:i2c_api` | ✅ | Wire protocol + `embedded_hal::i2c::I2c` seam + the `Transport` seam. Host wire-codec tests. |
 | `client` | `//drivers/i2c/client:i2c_client` | ✅ | `I2cClient<T: Transport>` implements `I2c`; **all** marshalling. No kernel/IPC dep. |
-| `client-ipc` | `//drivers/i2c/client-ipc:i2c_client_ipc` | ❌ kernel | `IpcTransport` (`channel_transact`). The one IPC-coupled client piece. |
+| `client-ipc` | `//drivers/i2c/client-ipc:i2c_client_ipc` | ❌ embedded | `IpcTransport` (`channel_transact`). The one IPC-coupled client piece. |
 | `server` | `//drivers/i2c/server:i2c_server` | ✅ | Pure `dispatch()` + `LoopbackTransport`. Host dispatch + e2e tests. |
-| `server-runtime` | `//drivers/i2c/server-runtime:i2c_server_runtime` | ❌ kernel | The Pigweed WaitGroup wait/respond loop. One channel per bus. |
-| `backend` (ast10x0) | `//target/ast10x0/backend/i2c:i2c_backend_ast10x0` (crate `i2c_backend`) | ❌ kernel | bus → reg-ptr map, `init_bus`, `open_bus`/`open_bus_dma`. Under `target/`. |
+| `server-runtime` | `//drivers/i2c/server-runtime:i2c_server_runtime` | ❌ embedded | The Pigweed WaitGroup wait/respond loop. One channel per bus. |
+| `backend` (ast10x0) | `//target/ast10x0/backend/i2c:i2c_backend_ast10x0` (crate `i2c_backend`) | ❌ embedded | bus → reg-ptr map, `init_bus`, `open_bus`/`open_bus_dma`. Under `target/`. |
 
 ## Key invariants
 
@@ -95,6 +95,21 @@ reused after correcting its `I2cHardwareCore` supertrait to `ErrorType`.
 Deferred: slave TX/`ReadRequest`, multi-message queue, blocking/timeout, the
 `system.json5`/app + MCTP-consumer integration. The IRQ→USER path is
 QEMU-verified only (by decision); host tests cover the wire codec + dispatch.
+
+## Test matrix
+
+| Test target | Tags | What it covers |
+|-------------|------|----------------|
+| `//drivers/i2c/api:i2c_api_test` | `host` | Wire-codec unit tests: `I2cRequestHeader`/`I2cResponseHeader` round-trips, `I2cOpDesc` encode/decode, error + opcode byte mapping stability, slave opcode round-trips (`ConfigureSlave`…`SlaveReceive`), `SlaveReceive` max-len in `op_count`, `NoData` status round-trip |
+| `//drivers/i2c/server:i2c_server_test` | `host` | `dispatch()`: write+read round-trip through a mock bus, bus error → wire error-code mapping, short/malformed request rejected without panic. `dispatch_slave()`: configure/enable/disable apply to device, runtime-owned ops (`SlaveReceive`) and malformed requests rejected |
+| `//drivers/i2c/tests:i2c_loopback_test` | `host` | End-to-end: consumer drives `I2cClient` purely through the `embedded_hal::i2c::I2c` seam; `LoopbackTransport` routes the **real** client encoders/decoders into `i2c_server::dispatch` onto an `EchoBus` mock. Verifies address, write payload, op ordering, and read scatter — the exact marshalling path used in production |
+| `//target/ast10x0/tests/peripherals/i2c/i2c_init:i2c` | `embedded` `qemu` | Full kernel/ARM system image build + boot: `Ast10x0Board::init()` brings up all wired I2C buses (incl. DMA); server-runtime loop starts; slave/notification IRQ path exercised |
+
+**Not yet covered:**
+- Slave TX / `ReadRequest` / `slave_set_response` (deferred)
+- Multi-message queue + blocking `wait_for_messages` + timeouts (deferred)
+- Hardware EVB (`--config=k_ast1060_evb`) — I2C is QEMU-verified only by current decision
+- Host-modeled IRQ — notification path is QEMU-only by decision
 
 ## Status
 
