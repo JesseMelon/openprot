@@ -19,6 +19,7 @@ rust_library(
         "//drivers/i2c/api:i2c_api",
         "//drivers/i2c/server:i2c_server",
         "@pigweed//pw_kernel/userspace",
+        "@pigweed//pw_log/rust:pw_log",
         "@rust_crates//:zerocopy",
     ],
 )
