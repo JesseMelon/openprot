@@ -17,6 +17,7 @@
 
 use embedded_hal::i2c::SevenBitAddress;
 use openprot_hal_blocking::i2c_hardware::slave::{I2cSEvent, I2cSlaveBuffer, I2cSlaveCore};
+use openprot_hal_blocking::i2c_hardware::I2cBusRecovery;
 
 use super::controller::Ast1060I2c;
 use super::slave::{SlaveConfig, SlaveEvent};
@@ -108,6 +109,12 @@ impl<Y: FnMut(u32)> I2cSlaveBuffer<SevenBitAddress> for Ast1060I2c<'_, Y> {
     /// that matters). Not used by the notification slice.
     fn rx_buffer_count(&self) -> Result<usize, Self::Error> {
         Ok(usize::from(self.slave_has_data()))
+    }
+}
+
+impl<Y: FnMut(u32)> I2cBusRecovery for Ast1060I2c<'_, Y> {
+    fn recover_bus(&mut self) -> Result<(), Self::Error> {
+        Ast1060I2c::recover_bus(self)
     }
 }
 

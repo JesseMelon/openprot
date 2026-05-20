@@ -96,6 +96,21 @@ pub trait I2cHardwareCore: ErrorType {
     fn recover_bus(&mut self) -> Result<(), Self::Error>;
 }
 
+/// Bus recovery — minimal seam for callers that need recovery without the full
+/// `I2cHardwareCore` init/timing contract.
+///
+/// Implemented by hardware drivers that can toggle SCL to un-stick a held-SDA
+/// condition. The server-runtime requires this bound so it can recover after
+/// bus/arbitration errors without the client needing to know.
+pub trait I2cBusRecovery: ErrorType {
+    /// Attempt to recover the bus from a stuck condition (held SDA/SCL).
+    ///
+    /// On success the bus is idle and the next transaction can proceed.
+    /// On error the bus is unrecoverable by software; the caller should
+    /// propagate the original transfer error to its client.
+    fn recover_bus(&mut self) -> Result<(), Self::Error>;
+}
+
 /// I2C Master mode operations
 ///
 /// This trait extends the core interface with master-specific functionality.

@@ -25,7 +25,7 @@ pub use embedded_hal::i2c::{
 pub use openprot_hal_blocking::i2c_hardware::slave::{
     I2cSEvent, I2cSlaveBuffer, I2cSlaveCore, I2cSlaveInterrupts, SlaveStatus,
 };
-pub use openprot_hal_blocking::i2c_hardware::I2cHardwareCore;
+pub use openprot_hal_blocking::i2c_hardware::{I2cBusRecovery, I2cHardwareCore};
 
 use crate::protocol::I2cError;
 

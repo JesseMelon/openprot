@@ -24,7 +24,7 @@
 
 #![no_std]
 
-use i2c_api::seam::{I2c, I2cSlaveBuffer, SevenBitAddress};
+use i2c_api::seam::{I2c, I2cBusRecovery, I2cSlaveBuffer, SevenBitAddress};
 use i2c_api::{I2cError, I2cOp, I2cRequestHeader, I2cResponseHeader, MAX_PAYLOAD_SIZE};
 use i2c_server::slave::dispatch_slave;
 use i2c_server::{dispatch, MAX_BUF_SIZE};
@@ -82,7 +82,7 @@ fn header(req: &[u8]) -> Option<(I2cOp, usize)> {
 /// with `wg`, then loops. `buses` must be non-empty with distinct channels.
 pub fn run<B>(wg: u32, irq: u32, irq_signals: Signals, buses: &mut [Bus<B>]) -> !
 where
-    B: I2c<SevenBitAddress> + I2cSlaveBuffer<SevenBitAddress>,
+    B: I2c<SevenBitAddress> + I2cSlaveBuffer<SevenBitAddress> + I2cBusRecovery,
 {
     for bus in buses.iter() {
         let _ = syscall::wait_group_add(wg, bus.channel, Signals::READABLE, bus.channel as usize);
@@ -136,7 +136,28 @@ where
         let req = &request_buf[..req_len];
 
         let resp_len = match header(req) {
-            Some((I2cOp::Transaction, _)) => dispatch(&mut bus.driver, req, &mut response_buf),
+            Some((I2cOp::Transaction, _)) => {
+                let n = dispatch(&mut bus.driver, req, &mut response_buf);
+                // After a bus-level error, attempt hardware recovery so the
+                // next transaction starts clean. The client already has the
+                // encoded error; recovery is best-effort (ignore its result).
+                if n >= I2cResponseHeader::SIZE {
+                    if let Some(rhdr) = zerocopy::Ref::<_, I2cResponseHeader>::from_bytes(
+                        &response_buf[..I2cResponseHeader::SIZE],
+                    )
+                    .ok()
+                    {
+                        use i2c_api::I2cError;
+                        match rhdr.error_code() {
+                            I2cError::Bus | I2cError::ArbitrationLoss | I2cError::Timeout => {
+                                let _ = bus.driver.recover_bus();
+                            }
+                            _ => {}
+                        }
+                    }
+                }
+                n
+            }
             Some((I2cOp::ConfigureSlave | I2cOp::EnableSlave | I2cOp::DisableSlave, _)) => {
                 dispatch_slave(&mut bus.driver, req, &mut response_buf)
             }
