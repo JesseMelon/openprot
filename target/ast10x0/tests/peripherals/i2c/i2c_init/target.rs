@@ -408,14 +408,15 @@ fn run_init_case_dma(name: &str, config: I2cConfig) -> Result<(), &'static str> 
         name as &str
     );
 
-    let mut dma_buf = [0u8; 64];
+    let mut master_dma_buf = [0u8; 64];
+    let mut slave_dma_buf = [0u8; 32];
 
     // SAFETY: single MMIO-pointer perimeter — the test owns controller 1 for
     // the process lifetime and pairs its matching I2C/I2CBUFF blocks.
     let mmio = unsafe {
         Ast1060I2cRegisters::new(ast1060_pac::I2c1::ptr(), ast1060_pac::I2cbuff1::ptr())
     };
-    let result = Ast1060I2c::new_with_dma(mmio, &config, &mut dma_buf, |_| core::hint::spin_loop());
+    let result = Ast1060I2c::new_with_dma(mmio, &config, &mut master_dma_buf, &mut slave_dma_buf, |_| core::hint::spin_loop());
 
     match result {
         Ok(_i2c) => {

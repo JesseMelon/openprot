@@ -42,8 +42,10 @@ pub struct Ast1060I2c<'a, Y: FnMut(u32)> {
     pub(crate) current_xfer_cnt: u32,
     /// Completion flag for synchronous operations
     pub(crate) completion: bool,
-    /// DMA buffer for DMA mode (non-cached SRAM, caller-owned)
-    pub(crate) dma_buf: Option<&'a mut [u8]>,
+    /// Master DMA staging buffer (non-cached SRAM, caller-owned)
+    pub(crate) master_dma_buf: Option<&'a mut [u8]>,
+    /// Slave DMA buffer for slave RX (non-cached SRAM, caller-owned)
+    pub(crate) slave_dma_buf: Option<&'a mut [u8]>,
     /// Cooperative yield invoked between status polls in
     /// [`wait_completion`]. Argument is the suggested wait window in
     /// nanoseconds.
@@ -99,51 +101,54 @@ impl<'a, Y: FnMut(u32)> Ast1060I2c<'a, Y> {
             current_len: 0,
             current_xfer_cnt: 0,
             completion: false,
-            dma_buf: None,
+            master_dma_buf: None,
+            slave_dma_buf: None,
             yield_ns,
         }
     }
 
     /// Create I2C instance with DMA mode support.
     ///
-    /// Like [`new`] but also attaches a DMA buffer for use when
-    /// `xfer_mode == I2cXferMode::DmaMode`. The buffer must reside in
-    /// non-cached SRAM (e.g. `#[link_section = ".ram_nc"]`) so that the
-    /// DMA engine and CPU see the same data without cache maintenance.
+    /// Like [`new`] but also attaches separate master and slave DMA buffers.
+    /// Both buffers must reside in non-cached SRAM (e.g. `#[link_section = ".ram_nc"]`)
+    /// so that the DMA engine and CPU see the same data without cache maintenance.
     ///
-    /// `dma_buf` must reside in non-cached SRAM the DMA engine and CPU see
-    /// coherently, and remain valid for this `Ast1060I2c`'s lifetime.
+    /// - `master_dma_buf`: staging buffer for master TX/RX DMA (up to 4096 B)
+    /// - `slave_dma_buf`: receive buffer for slave RX DMA (256 B recommended)
     pub fn new_with_dma(
         mmio: Ast1060I2cRegisters,
         config: &I2cConfig,
-        dma_buf: &'a mut [u8],
+        master_dma_buf: &'a mut [u8],
+        slave_dma_buf: &'a mut [u8],
         yield_ns: Y,
     ) -> Result<Self, I2cError> {
         let mut i2c = Self::from_initialized(mmio, config, yield_ns);
-        i2c.dma_buf = Some(dma_buf);
+        i2c.master_dma_buf = Some(master_dma_buf);
+        i2c.slave_dma_buf = Some(slave_dma_buf);
         i2c.init_hardware(config)?;
         Ok(i2c)
     }
 
-    /// Create I2C instance from pre-initialized hardware with DMA buffer
+    /// Create I2C instance from pre-initialized hardware with DMA buffers
     /// (NO hardware init).
     ///
-    /// Like [`from_initialized`] but attaches a DMA buffer for use when
-    /// `xfer_mode == I2cXferMode::DmaMode`. Use this per-operation after
-    /// the bus has already been initialized via [`new_with_dma`], to
-    /// avoid the overhead of re-running hardware initialization.
+    /// Like [`from_initialized`] but attaches separate master and slave DMA
+    /// buffers. Use when the bus was already initialized via [`new_with_dma`]
+    /// or `init_bus` and you want to avoid redundant hardware init.
     ///
-    /// The buffer must reside in non-cached SRAM (e.g. `#[link_section = ".ram_nc"]`)
-    /// and remain valid for this `Ast1060I2c`'s lifetime.
+    /// Both buffers must reside in non-cached SRAM and remain valid for this
+    /// `Ast1060I2c`'s lifetime.
     #[must_use]
     pub fn from_initialized_with_dma(
         mmio: Ast1060I2cRegisters,
         config: &I2cConfig,
-        dma_buf: &'a mut [u8],
+        master_dma_buf: &'a mut [u8],
+        slave_dma_buf: &'a mut [u8],
         yield_ns: Y,
     ) -> Self {
         let mut i2c = Self::from_initialized(mmio, config, yield_ns);
-        i2c.dma_buf = Some(dma_buf);
+        i2c.master_dma_buf = Some(master_dma_buf);
+        i2c.slave_dma_buf = Some(slave_dma_buf);
         i2c
     }
 

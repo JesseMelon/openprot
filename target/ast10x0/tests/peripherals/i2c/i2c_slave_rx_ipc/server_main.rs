@@ -24,11 +24,13 @@ const SLAVE_CFG: I2cConfig = I2cConfig {
     clock_config: ClockConfig::ast1060_default(),
 };
 
-// Non-cached SRAM buffer for DMA — must be visible to both the DMA engine and
+// Non-cached SRAM buffers for DMA — must be visible to both the DMA engine and
 // the CPU without cache aliasing.  The linker places `.ram_nc` sections in the
 // non-cached SRAM window of the AST1060.
 #[unsafe(link_section = ".ram_nc")]
-static mut DMA_BUF: [u8; 256] = [0u8; 256];
+static mut MASTER_DMA_BUF: [u8; 4096] = [0u8; 4096];
+#[unsafe(link_section = ".ram_nc")]
+static mut SLAVE_DMA_BUF: [u8; 256] = [0u8; 256];
 
 #[entry]
 fn entry() {
@@ -41,11 +43,13 @@ fn entry() {
     }
 
     // Phase B: wrap the initialised controller in DMA mode.
-    // SAFETY: init_bus(2) done above; DMA_BUF is in non-cached SRAM
+    // SAFETY: init_bus(2) done above; both buffers are in non-cached SRAM
     // and uniquely owned by this bus for the driver's lifetime.
-    let dma_buf: &'static mut [u8] =
-        unsafe { &mut *core::ptr::addr_of_mut!(DMA_BUF) };
-    let driver = match unsafe { i2c_backend::open_bus_dma(2, &SLAVE_CFG, dma_buf) } {
+    let master_dma_buf: &'static mut [u8] =
+        unsafe { &mut *core::ptr::addr_of_mut!(MASTER_DMA_BUF) };
+    let slave_dma_buf: &'static mut [u8] =
+        unsafe { &mut *core::ptr::addr_of_mut!(SLAVE_DMA_BUF) };
+    let driver = match unsafe { i2c_backend::open_bus_dma(2, &SLAVE_CFG, master_dma_buf, slave_dma_buf) } {
         Ok(d) => d,
         Err(_) => {
             pw_log::error!("open_bus_dma(2) failed");

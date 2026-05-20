@@ -164,11 +164,18 @@ pub unsafe fn open_bus(bus: u8, config: &I2cConfig) -> Result<BusDriver, I2cErro
 pub unsafe fn open_bus_dma(
     bus: u8,
     config: &I2cConfig,
-    dma_buf: &'static mut [u8],
+    master_dma_buf: &'static mut [u8],
+    slave_dma_buf: &'static mut [u8],
 ) -> Result<BusDriver, I2cError> {
     let (regs, buff) = regs_for(bus).ok_or(I2cError::Invalid)?;
-    // SAFETY: single MMIO-pointer perimeter; `dma_buf` non-cached + uniquely
-    // owned per the contract.
+    // SAFETY: single MMIO-pointer perimeter; both buffers are non-cached +
+    // uniquely owned per the contract.
     let mmio = unsafe { Ast1060I2cRegisters::new(regs, buff) };
-    Ok(Ast1060I2c::from_initialized_with_dma(mmio, config, dma_buf, spin as Yield))
+    Ok(Ast1060I2c::from_initialized_with_dma(
+        mmio,
+        config,
+        master_dma_buf,
+        slave_dma_buf,
+        spin as Yield,
+    ))
 }

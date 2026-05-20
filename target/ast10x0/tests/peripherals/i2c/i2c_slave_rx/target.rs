@@ -96,8 +96,9 @@ fn run_slave_rx_test() -> Result<(), &'static str> {
 
     // Phase D — drain buffer and assert payload matches.
     let mut rx = [0u8; 32];
+    let read_len = rx_len.min(rx.len());
     let n = driver
-        .read_slave_buffer(&mut rx[..rx_len.min(rx.len())])
+        .read_slave_buffer(&mut rx[..read_len])
         .map_err(|e| {
             pw_log::error!("read_slave_buffer failed: {}", i2c_error_str(e) as &str);
             "read_slave_buffer failed"
