@@ -31,11 +31,13 @@ use i2c_server::{dispatch, MAX_BUF_SIZE};
 use userspace::syscall::{self, Signals};
 use userspace::time::Instant;
 
-/// One bus the server owns: its dedicated IPC channel, the driver instance
+/// One bus the server owns: its dedicated IPC channel, IRQ handle, the driver instance
 /// (master + slave), and the per-bus slave-RX notification latch.
 pub struct Bus<B> {
     /// IPC channel handle (`channel_handler`) dedicated to this bus.
     pub channel: u32,
+    /// IRQ handle for this bus's controller.
+    pub irq: u32,
     /// The bus driver — implements both the master and slave seams.
     pub driver: B,
     notif_enabled: bool,
@@ -50,9 +52,10 @@ pub struct Bus<B> {
 }
 
 impl<B> Bus<B> {
-    pub const fn new(channel: u32, driver: B) -> Self {
+    pub const fn new(channel: u32, irq: u32, driver: B) -> Self {
         Self {
             channel,
+            irq,
             driver,
             notif_enabled: false,
             rx: [0u8; MAX_PAYLOAD_SIZE],
@@ -112,52 +115,45 @@ where
             continue;
         };
 
-        // ---- hardware slave IRQ: drain armed buses, ack, wake clients ----
+        // ---- hardware slave IRQ: drain the armed bus, ack, wake client ----
         if w.user_data as u32 == irq && w.pending_signals.contains(irq_signals) {
             let acked = w.pending_signals & irq_signals;
-            for (bus_idx_opt, bus) in buses.iter_mut().enumerate() {
-                #[allow(unused_variables)]
-                let bus_idx = bus_idx_opt;
-                if !bus.notif_enabled {
-                    continue;
-                }
-                match bus.driver.poll_slave_data() {
-                    Ok(Some(_)) => {
-                        match bus.driver.read_slave_buffer(&mut bus.rx) {
-                            Ok(n) => {
-                                if n > 0 {
-                                    bus.rx_len = n;
-                                    // Event kind is always DataReceived in the current model
-                                    // (hardware delivers complete buffers, not per-byte events).
-                                    bus.rx_event_kind = SlaveEventKind::DataReceived;
-                                    // Source address: placeholder until backend extracts it.
-                                    // For now, use 0xFF (invalid address) to signal unavailable.
-                                    bus.rx_source = 0xFF;
+            if let Some(bus) = buses.iter_mut().find(|b| b.irq == irq) {
+                if bus.notif_enabled {
+                    match bus.driver.poll_slave_data() {
+                        Ok(Some(_)) => {
+                            match bus.driver.read_slave_buffer(&mut bus.rx) {
+                                Ok(n) => {
+                                    if n > 0 {
+                                        bus.rx_len = n;
+                                        // Event kind is always DataReceived in the current model
+                                        // (hardware delivers complete buffers, not per-byte events).
+                                        bus.rx_event_kind = SlaveEventKind::DataReceived;
+                                        // Source address: placeholder until backend extracts it.
+                                        // For now, use 0xFF (invalid address) to signal unavailable.
+                                        bus.rx_source = 0xFF;
+                                    }
+                                }
+                                Err(_) => {
+                                    pw_log::error!("read_slave_buffer failed");
                                 }
                             }
-                            Err(_) => {
-                                pw_log::error!("read_slave_buffer bus[%u] failed", bus_idx as u32);
-                            }
+                        }
+                        Ok(None) => {
+                            // No data ready — normal path
+                        }
+                        Err(_) => {
+                            pw_log::error!("poll_slave_data failed");
                         }
                     }
-                    Ok(None) => {
-                        // No data ready — normal path, continue to next bus
-                    }
-                    Err(_) => {
-                        pw_log::error!("poll_slave_data bus[%u] failed", bus_idx as u32);
-                    }
                 }
-            }
-            if let Err(_) = syscall::interrupt_ack(irq, acked) {
-                pw_log::error!("interrupt_ack failed");
-            }
-            for (bus_idx_opt, bus) in buses.iter().enumerate() {
-                #[allow(unused_variables)]
-                let bus_idx = bus_idx_opt;
+                if let Err(_) = syscall::interrupt_ack(irq, acked) {
+                    pw_log::error!("interrupt_ack failed");
+                }
                 if bus.notif_enabled && bus.rx_len > 0 {
                     // ORs USER onto the bus channel without disturbing READABLE.
                     if let Err(_) = syscall::object_set_peer_user_signal(bus.channel, true) {
-                        pw_log::error!("object_set_peer_user_signal bus[%u] failed", bus_idx as u32);
+                        pw_log::error!("object_set_peer_user_signal failed");
                     }
                 }
             }
