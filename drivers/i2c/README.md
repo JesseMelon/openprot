@@ -194,6 +194,14 @@ Seam = `openprot_hal_blocking::i2c_hardware::slave` (`I2cSlaveCore`/`Buffer`),
 reused. IRQ→USER notification path is QEMU-verified only (by decision); host
 tests verify wire codec and server dispatch logic.
 
+**Reference implementation:** See branch `openprot/ocp-emea-demo-stack-facade`
+(commit `610d1f0`, "mctp: wire real I2C transport into server loop"). It shows
+how the MCTP server multiplexes IPC client requests and I2C slave notifications
+via a WaitGroup, decodes incoming MCTP-I2C packets, and routes them to the MCTP
+stack. The transport-i2c crate (`MctpI2cReceiver`) handles MCTP framing strip
+and PEC validation; the i2c_client exposes `register_notification()` and
+`get_pending_messages()` for fetching slave events.
+
 ## Test matrix
 
 | Test target | Tags | What it covers |
