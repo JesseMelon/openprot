@@ -89,19 +89,19 @@ fn header(req: &[u8]) -> Option<(I2cOp, usize)> {
 
 /// Run the i2c server forever.
 ///
-/// Registers every bus channel (`READABLE`) and the i2c `irq` (`irq_signals`)
+/// Registers every bus channel (`READABLE`) and each bus's IRQ (`irq_signals`)
 /// with `wg`, then loops. `buses` must be non-empty with distinct channels.
-pub fn run<B>(wg: u32, irq: u32, irq_signals: Signals, buses: &mut [Bus<B>]) -> !
+pub fn run<B>(wg: u32, irq_signals: Signals, buses: &mut [Bus<B>]) -> !
 where
     B: I2c<SevenBitAddress> + I2cSlaveBuffer<SevenBitAddress> + I2cBusRecovery,
 {
-    for (_idx, bus) in buses.iter().enumerate() {
+    for bus in buses.iter() {
         if let Err(_) = syscall::wait_group_add(wg, bus.channel, Signals::READABLE, bus.channel as usize) {
-            pw_log::error!("wait_group_add bus[%u] failed", _idx as u32);
+            pw_log::error!("wait_group_add bus channel failed");
         }
-    }
-    if let Err(_) = syscall::wait_group_add(wg, irq, irq_signals, irq as usize) {
-        pw_log::error!("wait_group_add irq failed");
+        if let Err(_) = syscall::wait_group_add(wg, bus.irq, irq_signals, bus.irq as usize) {
+            pw_log::error!("wait_group_add irq failed");
+        }
     }
 
     let mut request_buf = [0u8; MAX_BUF_SIZE];
