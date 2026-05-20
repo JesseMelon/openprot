@@ -622,6 +622,9 @@ impl I2cHardwareCore for MockI2cHardware {
     /// let mut failing_mock = MockI2cHardware::new_failing();
     /// assert!(failing_mock.recover_bus().is_err());
     /// ```
+}
+
+impl I2cBusRecovery for MockI2cHardware {
     fn recover_bus(&mut self) -> Result<(), Self::Error> {
         self.check_success()
     }
@@ -1104,9 +1107,16 @@ where
         self.base_hardware.handle_interrupt();
     }
 
+}
+
+impl<S> I2cBusRecovery for MockI2cHardwareWithSystem<S>
+where
+    S: openprot_hal_blocking::system_control::SystemControl<
+        ClockId = crate::system_control::MockClockId,
+        ResetId = crate::system_control::MockResetId,
+    >,
+{
     fn recover_bus(&mut self) -> Result<(), Self::Error> {
-        // In real hardware, bus recovery might require system-level operations
-        // For now, delegate to base implementation
         self.base_hardware.recover_bus()
     }
 }

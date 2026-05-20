@@ -40,6 +40,9 @@
 #![no_std]
 
 use ast1060_pac::{i2c::RegisterBlock, i2cbuff::RegisterBlock as BuffRegisterBlock};
+use embedded_hal::i2c::{ErrorType, I2c, Operation, SevenBitAddress};
+use openprot_hal_blocking::i2c_hardware::slave::{I2cSlaveBuffer, I2cSlaveCore};
+use openprot_hal_blocking::i2c_hardware::I2cBusRecovery;
 
 pub use ast10x0_peripherals::i2c::{
     Ast1060I2c, Ast1060I2cRegisters, ClockConfig, I2cConfig, I2cError, I2cSpeed, I2cXferMode,
@@ -53,13 +56,146 @@ pub use ast10x0_peripherals::i2c::{
 pub type Yield = fn(u32);
 
 /// The concrete driver type the server owns, one per bus.
-pub type BusDriver = Ast1060I2c<'static, Yield>;
+pub type BusDriver = Ast1060I2cBackend;
 
 /// Highest AST1060 I2C controller index (controllers 0..=13).
 pub const MAX_BUS: u8 = 13;
 
 fn spin(_ns: u32) {
     core::hint::spin_loop();
+}
+
+/// AST10x0 I2C backend — owns MMIO pointers and DMA buffers for one bus,
+/// constructs a transient [`Ast1060I2c`] driver per HAL operation.
+///
+/// This is the [`BusDriver`] held by the server. `make_driver()` re-creates
+/// a thin `Ast1060I2c` each call so no per-operation state survives across HAL
+/// method boundaries. DMA buffers are reborrowed for each driver's lifetime
+/// and released when the transient driver is dropped at end of call.
+pub struct Ast1060I2cBackend {
+    regs: Ast1060I2cRegisters,
+    config: I2cConfig,
+    /// Master DMA staging buffer; `None` for buffer-mode (non-DMA) buses.
+    master_dma_buf: Option<&'static mut [u8]>,
+    /// Slave DMA receive buffer; `None` for buffer-mode buses.
+    slave_dma_buf: Option<&'static mut [u8]>,
+    /// Mirrored slave enable state — serves `I2cSlaveCore::is_slave_mode_enabled(&self)`.
+    slave_enabled: bool,
+    /// Mirrored slave address — serves `I2cSlaveCore::slave_address(&self)`.
+    slave_addr: Option<SevenBitAddress>,
+}
+
+impl Ast1060I2cBackend {
+    /// Construct a transient [`Ast1060I2c`] scoped to `&'_ mut self`.
+    ///
+    /// DMA buffers are reborrowed (`as_deref_mut`) so the transient driver's
+    /// lifetime is bounded by the `&mut self` borrow — the driver cannot
+    /// escape the HAL method that calls this. When both DMA buffers are
+    /// present the DMA-capable constructor is used; otherwise the buffer-mode
+    /// constructor is used.
+    fn make_driver(&mut self) -> Ast1060I2c<'_, Yield> {
+        let regs = self.regs;
+        if let (Some(m), Some(s)) = (
+            self.master_dma_buf.as_deref_mut(),
+            self.slave_dma_buf.as_deref_mut(),
+        ) {
+            Ast1060I2c::from_initialized_with_dma(regs, &self.config, m, s, spin as Yield)
+        } else {
+            Ast1060I2c::from_initialized(regs, &self.config, spin as Yield)
+        }
+    }
+}
+
+impl ErrorType for Ast1060I2cBackend {
+    type Error = I2cError;
+}
+
+impl I2c<SevenBitAddress> for Ast1060I2cBackend {
+    fn write(&mut self, address: SevenBitAddress, bytes: &[u8]) -> Result<(), Self::Error> {
+        self.make_driver().write(address, bytes)
+    }
+
+    fn read(&mut self, address: SevenBitAddress, buffer: &mut [u8]) -> Result<(), Self::Error> {
+        self.make_driver().read(address, buffer)
+    }
+
+    fn write_read(
+        &mut self,
+        address: SevenBitAddress,
+        bytes: &[u8],
+        buffer: &mut [u8],
+    ) -> Result<(), Self::Error> {
+        self.make_driver().write_read(address, bytes, buffer)
+    }
+
+    fn transaction(
+        &mut self,
+        address: SevenBitAddress,
+        operations: &mut [Operation<'_>],
+    ) -> Result<(), Self::Error> {
+        self.make_driver().transaction(address, operations)
+    }
+}
+
+impl I2cSlaveCore<SevenBitAddress> for Ast1060I2cBackend {
+    fn configure_slave_address(&mut self, addr: SevenBitAddress) -> Result<(), Self::Error> {
+        self.make_driver().configure_slave_address(addr)?;
+        self.slave_addr = Some(addr);
+        Ok(())
+    }
+
+    fn enable_slave_mode(&mut self) -> Result<(), Self::Error> {
+        self.make_driver().enable_slave_mode()?;
+        self.slave_enabled = true;
+        Ok(())
+    }
+
+    fn disable_slave_mode(&mut self) -> Result<(), Self::Error> {
+        self.make_driver().disable_slave_mode()?;
+        self.slave_enabled = false;
+        Ok(())
+    }
+
+    fn is_slave_mode_enabled(&self) -> bool {
+        self.slave_enabled
+    }
+
+    fn slave_address(&self) -> Option<SevenBitAddress> {
+        self.slave_addr
+    }
+}
+
+impl I2cSlaveBuffer<SevenBitAddress> for Ast1060I2cBackend {
+    fn read_slave_buffer(&mut self, buffer: &mut [u8]) -> Result<usize, Self::Error> {
+        self.make_driver().read_slave_buffer(buffer)
+    }
+
+    fn write_slave_response(&mut self, data: &[u8]) -> Result<(), Self::Error> {
+        self.make_driver().write_slave_response(data)
+    }
+
+    fn poll_slave_data(&mut self) -> Result<Option<usize>, Self::Error> {
+        self.make_driver().poll_slave_data()
+    }
+
+    fn clear_slave_buffer(&mut self) -> Result<(), Self::Error> {
+        self.make_driver().clear_slave_buffer()
+    }
+
+    fn tx_buffer_space(&self) -> Result<usize, Self::Error> {
+        Ok(32)
+    }
+
+    fn rx_buffer_count(&self) -> Result<usize, Self::Error> {
+        // Conservative: use poll_slave_data() for the actual drain path.
+        Ok(0)
+    }
+}
+
+impl I2cBusRecovery for Ast1060I2cBackend {
+    fn recover_bus(&mut self) -> Result<(), Self::Error> {
+        self.make_driver().recover_bus()
+    }
 }
 
 /// Resolve a bus index to its `(I2C, I2CBUFF)` register-block pointers.
@@ -145,7 +281,14 @@ pub unsafe fn open_bus(bus: u8, config: &I2cConfig) -> Result<BusDriver, I2cErro
     // SAFETY: single MMIO-pointer perimeter; caller upholds exclusive
     // ownership and prior board init (incl. `init_bus`).
     let mmio = unsafe { Ast1060I2cRegisters::new(regs, buff) };
-    Ok(Ast1060I2c::from_initialized(mmio, config, spin as Yield))
+    Ok(Ast1060I2cBackend {
+        regs: mmio,
+        config: *config,
+        master_dma_buf: None,
+        slave_dma_buf: None,
+        slave_enabled: false,
+        slave_addr: None,
+    })
 }
 
 /// Open a DmaMode controller the board has already initialized, attaching a
@@ -171,11 +314,12 @@ pub unsafe fn open_bus_dma(
     // SAFETY: single MMIO-pointer perimeter; both buffers are non-cached +
     // uniquely owned per the contract.
     let mmio = unsafe { Ast1060I2cRegisters::new(regs, buff) };
-    Ok(Ast1060I2c::from_initialized_with_dma(
-        mmio,
-        config,
-        master_dma_buf,
-        slave_dma_buf,
-        spin as Yield,
-    ))
+    Ok(Ast1060I2cBackend {
+        regs: mmio,
+        config: *config,
+        master_dma_buf: Some(master_dma_buf),
+        slave_dma_buf: Some(slave_dma_buf),
+        slave_enabled: false,
+        slave_addr: None,
+    })
 }

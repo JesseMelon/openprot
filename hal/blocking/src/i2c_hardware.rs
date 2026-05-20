@@ -91,9 +91,6 @@ pub trait I2cHardwareCore: ErrorType {
 
     /// Handle hardware interrupt events (called from ISR)
     fn handle_interrupt(&mut self);
-
-    /// Attempt to recover the I2C bus from stuck conditions
-    fn recover_bus(&mut self) -> Result<(), Self::Error>;
 }
 
 /// Bus recovery — minimal seam for callers that need recovery without the full
