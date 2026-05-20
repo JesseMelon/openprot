@@ -95,11 +95,9 @@ pub fn run<B>(wg: u32, irq: u32, irq_signals: Signals, buses: &mut [Bus<B>]) -> 
 where
     B: I2c<SevenBitAddress> + I2cSlaveBuffer<SevenBitAddress> + I2cBusRecovery,
 {
-    for (idx_opt, bus) in buses.iter().enumerate() {
-        #[allow(unused_variables)]
-        let idx = idx_opt;
+    for (_idx, bus) in buses.iter().enumerate() {
         if let Err(_) = syscall::wait_group_add(wg, bus.channel, Signals::READABLE, bus.channel as usize) {
-            pw_log::error!("wait_group_add bus[%u] failed", idx as u32);
+            pw_log::error!("wait_group_add bus[%u] failed", _idx as u32);
         }
     }
     if let Err(_) = syscall::wait_group_add(wg, irq, irq_signals, irq as usize) {
