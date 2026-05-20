@@ -18,9 +18,9 @@
 use embedded_hal::i2c::SevenBitAddress;
 use openprot_hal_blocking::i2c_hardware::slave::{I2cSEvent, I2cSlaveBuffer, I2cSlaveCore};
 use openprot_hal_blocking::i2c_hardware::I2cBusRecovery;
-use i2c_api::seam::I2cSlaveEvent;
 
 use super::controller::Ast1060I2c;
+use super::error::I2cError;
 use super::slave::{SlaveConfig, SlaveEvent};
 
 /// Driver `SlaveEvent` → HAL `I2cSEvent`. The notification path only acts on
@@ -91,19 +91,6 @@ impl<Y: FnMut(u32)> I2cSlaveBuffer<SevenBitAddress> for Ast1060I2c<'_, Y> {
         Ok(self.handle_slave_interrupt().and_then(rx_len))
     }
 
-    /// Poll slave interrupt and return both event kind and rx length (if any).
-    /// This exposes the full hardware event (ReadRequest, Stop, etc.) alongside
-    /// the receive count, so the server-runtime can store the actual event kind
-    /// rather than always hardcoding DataReceived.
-    pub fn poll_slave_event(&mut self) -> Result<Option<(I2cSEvent, usize)>, Self::Error> {
-        let Some(ev) = self.handle_slave_interrupt() else {
-            return Ok(None);
-        };
-        let kind = to_hal_event(ev);
-        let len = rx_len(ev).unwrap_or(0);
-        Ok(Some((kind, len)))
-    }
-
     /// Best-effort: drain any pending RX so the next transaction starts clean.
     fn clear_slave_buffer(&mut self) -> Result<(), Self::Error> {
         if self.slave_has_data() {
@@ -126,14 +113,12 @@ impl<Y: FnMut(u32)> I2cSlaveBuffer<SevenBitAddress> for Ast1060I2c<'_, Y> {
     }
 }
 
-impl<Y: FnMut(u32)> I2cBusRecovery for Ast1060I2c<'_, Y> {
-    fn recover_bus(&mut self) -> Result<(), Self::Error> {
-        Ast1060I2c::recover_bus(self)
-    }
-}
-
-impl<Y: FnMut(u32)> I2cSlaveEvent for Ast1060I2c<'_, Y> {
-    fn poll_slave_event(&mut self) -> Result<Option<(I2cSEvent, usize)>, Self::Error> {
+impl<Y: FnMut(u32)> Ast1060I2c<'_, Y> {
+    /// Poll slave interrupt and return both event kind and rx length (if any).
+    /// This exposes the full hardware event (ReadRequest, Stop, etc.) alongside
+    /// the receive count, so the server-runtime can store the actual event kind
+    /// rather than always hardcoding DataReceived.
+    pub fn poll_slave_event(&mut self) -> Result<Option<(I2cSEvent, usize)>, I2cError> {
         let Some(ev) = self.handle_slave_interrupt() else {
             return Ok(None);
         };
@@ -143,10 +128,9 @@ impl<Y: FnMut(u32)> I2cSlaveEvent for Ast1060I2c<'_, Y> {
     }
 }
 
-// `to_hal_event` is part of the documented mapping contract; the thin
-// notification slice only needs `rx_len`, but keep the full mapping so
-// `last_slave_event`-style consumers (later slices) have one source of truth.
-#[allow(dead_code)]
-fn _event_mapping_is_total(ev: SlaveEvent) -> I2cSEvent {
-    to_hal_event(ev)
+impl<Y: FnMut(u32)> I2cBusRecovery for Ast1060I2c<'_, Y> {
+    fn recover_bus(&mut self) -> Result<(), Self::Error> {
+        Ast1060I2c::recover_bus(self)
+    }
 }
+

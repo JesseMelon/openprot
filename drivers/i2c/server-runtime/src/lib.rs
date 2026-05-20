@@ -114,7 +114,10 @@ where
         };
 
         // ---- hardware slave IRQ: drain the armed bus, ack, wake client ----
-        if w.user_data as u32 == irq && w.pending_signals.contains(irq_signals) {
+        // Each bus registered its IRQ with user_data = bus.irq, so check if this
+        // signal came from an IRQ (vs. a client channel READABLE event).
+        if w.pending_signals.contains(irq_signals) {
+            let irq = w.user_data as u32;
             let acked = w.pending_signals & irq_signals;
             if let Some(bus) = buses.iter_mut().find(|b| b.irq == irq) {
                 if bus.notif_enabled {
@@ -133,9 +136,16 @@ where
                                     Ok(n) => {
                                         if n > 0 {
                                             bus.rx_len = n;
-                                            // Source address: placeholder until backend extracts it.
-                                            // For now, use 0xFF (invalid address) to signal unavailable.
-                                            bus.rx_source = 0xFF;
+                                            // Source address extraction from MCTP-I2C header.
+                                            // With AST_I2CC_SLAVE_PKT_SAVE_ADDR set, the hardware
+                                            // prepends dest address at byte[0]; the MCTP-I2C header
+                                            // carries source at byte[3]: src_addr << 1 | 1.
+                                            // Extract it (bits 7:1 = 7-bit address).
+                                            if n > 3 {
+                                                bus.rx_source = (bus.rx[3] >> 1) & 0x7F;
+                                            } else {
+                                                bus.rx_source = 0xFF; // Invalid: message too short
+                                            }
                                         }
                                     }
                                     Err(_) => {
@@ -155,7 +165,12 @@ where
                 if let Err(_) = syscall::interrupt_ack(irq, acked) {
                     pw_log::error!("interrupt_ack failed");
                 }
-                if bus.notif_enabled && bus.rx_len > 0 {
+                // Wake client on data events (DataReceived with bytes) or transaction
+                // boundaries (Stop). ReadRequest without data is deferred (post-demo).
+                let should_wake = bus.notif_enabled && (
+                    bus.rx_len > 0 || bus.rx_event_kind == SlaveEventKind::Stop
+                );
+                if should_wake {
                     // ORs USER onto the bus channel without disturbing READABLE.
                     if let Err(_) = syscall::object_set_peer_user_signal(bus.channel, true) {
                         pw_log::error!("object_set_peer_user_signal failed");
