@@ -138,7 +138,7 @@ where
                             }
                         }
                         Ok(None) => {
-                            // No data ready — normal path
+                            pw_log::debug!("slave IRQ fired but no data ready — spurious or non-data event");
                         }
                         Err(_) => {
                             pw_log::error!("poll_slave_data failed");
