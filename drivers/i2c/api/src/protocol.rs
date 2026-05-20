@@ -83,6 +83,31 @@ impl TryFrom<u8> for I2cOp {
     }
 }
 
+/// Kind of event returned by `SlaveWaitEvent`.
+#[repr(u8)]
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum SlaveEventKind {
+    /// Master wrote data to our slave address.
+    DataReceived = 0x00,
+    /// Master issued a read from our slave address.
+    ReadRequest = 0x01,
+    /// Master stopped the transaction (stop condition).
+    Stop = 0x02,
+}
+
+impl TryFrom<u8> for SlaveEventKind {
+    type Error = I2cError;
+
+    fn try_from(value: u8) -> Result<Self, Self::Error> {
+        match value {
+            0x00 => Ok(Self::DataReceived),
+            0x01 => Ok(Self::ReadRequest),
+            0x02 => Ok(Self::Stop),
+            _ => Err(I2cError::InvalidOperation),
+        }
+    }
+}
+
 /// Kind of a single bus operation within a transaction.
 #[repr(u8)]
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
@@ -329,10 +354,24 @@ mod tests {
             (0x05, I2cOp::EnableSlaveNotification),
             (0x06, I2cOp::DisableSlaveNotification),
             (0x07, I2cOp::SlaveReceive),
+            (0x08, I2cOp::SlaveSetResponse),
         ] {
             assert_eq!(I2cOp::try_from(raw), Ok(op));
             assert_eq!(op as u8, raw);
         }
+    }
+
+    #[test]
+    fn slave_event_kinds_roundtrip() {
+        for (raw, kind) in [
+            (0x00u8, SlaveEventKind::DataReceived),
+            (0x01, SlaveEventKind::ReadRequest),
+            (0x02, SlaveEventKind::Stop),
+        ] {
+            assert_eq!(SlaveEventKind::try_from(raw), Ok(kind));
+            assert_eq!(kind as u8, raw);
+        }
+        assert_eq!(SlaveEventKind::try_from(0xFF), Err(I2cError::InvalidOperation));
     }
 
     #[test]
