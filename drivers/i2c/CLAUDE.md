@@ -8,7 +8,7 @@ reconstruction of the working memory for this effort (the `~/.claude` memory
 is machine-local and does not travel). Human-facing rationale:
 `drivers/i2c/README.md` and `ASSESSMENT-stack-facade-template.md` (repo root).
 
-## Status — slave-RX notification slice landed; still not demo-complete
+## Status — slave-RX notification slice landed; SPDM responder still required
 
 Done: master `Transaction` path, **and** the thin slave-RX notification
 vertical slice — wire ops `ConfigureSlave`/`EnableSlave`/`DisableSlave`/
@@ -19,11 +19,19 @@ vertical slice — wire ops `ConfigureSlave`/`EnableSlave`/`DisableSlave`/
 i2c_hardware::slave` (reused, after the I2cHardwareCore→ErrorType trait fix,
 commit `3add2ff`).
 
-Still deferred for the full ocp-emea demo (do NOT assume present):
-slave TX / `ReadRequest` / `slave_set_response`; multi-message queue;
-blocking `wait_for_messages` + timeouts; the `system.json5`/app wiring +
-MCTP-server integration that actually consumes the `USER` wake; host-modeled
-IRQ (notification path is QEMU-verified only, by decision).
+**Required for SPDM responder support (ocp-emea demo):**
+- Event kind metadata (`DataReceived`, `ReadRequest`, `Stop`) in
+  `slave_receive_with_metadata()` — backend must return all event kinds from
+  `handle_slave_interrupt()`, not just data events
+- `slave_set_response()` — pre-load TX buffer for master's next read
+- Source address tracking — currently defaults to `0xFF`; backend must extract
+  from hardware registers
+
+Deferred (not needed for SPDM base):
+multi-message queue; blocking `wait_for_messages` + timeouts; the
+`system.json5`/app wiring + MCTP-server integration that *consumes* the
+`USER` wake; host-modeled IRQ (notification path is QEMU-verified only, by
+decision).
 
 ## Confined-`unsafe` MMIO Façade (pattern conformance)
 

@@ -9,10 +9,11 @@ carried over. i2c is strict request → response, run-to-completion.
 
 **Supports:**
 - **Master mode** — `embedded_hal::i2c::I2c::transaction()` (all operations;
-  write to send MCTP packets).
-- **Slave/target mode** — Basic slave RX via notification (receive master
-  writes into latched buffer). Current API incompatible with MCTP transport
-  requirements (see [MCTP API gap](#mctp-api-gap)).
+  write to send MCTP packets). ✅ Complete.
+- **Slave/target mode** — Interrupt-driven responder with event metadata for
+  SPDM/MCTP dual-role operation. ✅ Slave RX (data reception) complete;
+  ⚠️ Slave TX (ReadRequest responses) **required for SPDM responder** —
+  see [SPDM responder implementation](#spdm-responder-implementation).
 
 ```
  consumer (any embedded-hal driver)
@@ -138,21 +139,60 @@ The matching `system.json5` declares one `channel_handler` per bus, the i2c
 interrupt object, and one `wait_group`. Deferred until a concrete board
 target needs it — not fabricated speculatively.
 
-## Interrupt-driven responder (implementation complete)
+## SPDM responder implementation
 
-Client (target side): `configure_slave(addr)` → `enable_slave()` →
-`enable_notification()`; then on `Signals::USER` wake, call
-`slave_receive_with_metadata(&mut buf)` to get `(event_kind, source_address,
-data_len)` plus data. Stage response via `slave_set_response()` before master
-reads. Event kind distinguishes `DataReceived` from `ReadRequest`/`Stop`.
+**Status:** ⚠️ **REQUIRED for ocp-emea demo. Slave RX complete; slave TX in progress.**
+
+The i2c driver supports SPDM requester/responder dual-role operation via
+interrupt-driven event notification with metadata. A responder app:
+
+```rust
+client.configure_slave(RESPONDER_ADDR)?;
+client.enable_slave()?;
+client.enable_notification()?;
+
+loop {
+    // Wait for Signals::USER on the i2c channel
+    object_wait(handle::I2C, Signals::USER, Instant::MAX)?;
+    
+    // Get event metadata: kind, requester address, data
+    let event = client.slave_receive_with_metadata(&mut buf)?;
+    
+    match event.kind {
+        SlaveEventKind::DataReceived => {
+            // Master wrote to us; process SPDM request
+            // Generate response in `response_buf`
+            client.slave_set_response(&response_buf)?;
+        }
+        SlaveEventKind::ReadRequest => {
+            // Master is about to read from us; we must have staged a response
+            // via slave_set_response() in the prior cycle
+        }
+        SlaveEventKind::Stop => {
+            // Transaction boundary; clear state if needed
+        }
+    }
+}
+```
+
+**What's implemented:**
+- ✅ Slave RX data reception (`DataReceived` events)
+- ✅ Event metadata framework (kind + source address fields)
+- ✅ `slave_receive_with_metadata()` API
+- ✅ `slave_set_response()` API (wire protocol + server dispatch)
+- ✅ Server-runtime interrupt drain + per-bus latch
+
+**What's required for SPDM:**
+- ⚠️ Backend must return `ReadRequest` and `Stop` events from
+  `handle_slave_interrupt()` — currently only data-reception events trigger
+  client wakeup
+- ⚠️ Source address extraction from hardware registers (currently defaults
+  to `0xFF`)
+- 🔄 Hardware EVB testing (`--config=k_ast1060_evb`) — currently QEMU-only
 
 Seam = `openprot_hal_blocking::i2c_hardware::slave` (`I2cSlaveCore`/`Buffer`),
-reused. Source address currently defaults to `0xFF` (unavailable) pending
-backend extraction from hardware registers.
-
-Not yet covered (deferred): multi-message queue, blocking/timeout semantics,
-the `system.json5`/app + MCTP-consumer integration. The IRQ→USER path is
-QEMU-verified only (by decision); host tests cover the wire codec + dispatch.
+reused. IRQ→USER notification path is QEMU-verified only (by decision); host
+tests verify wire codec and server dispatch logic.
 
 ## Test matrix
 
@@ -163,13 +203,22 @@ QEMU-verified only (by decision); host tests cover the wire codec + dispatch.
 | `//drivers/i2c/tests:i2c_loopback_test` | `host` | End-to-end: consumer drives `I2cClient` purely through the `embedded_hal::i2c::I2c` seam; `LoopbackTransport` routes the **real** client encoders/decoders into `i2c_server::dispatch` onto an `EchoBus` mock. Verifies address, write payload, op ordering, read scatter, and slave-RX metadata — the exact marshalling path used in production |
 | `//target/ast10x0/tests/peripherals/i2c/i2c_init:i2c` | `embedded` `qemu` | Full kernel/ARM system image build + boot: `Ast10x0Board::init()` brings up all wired I2C buses (incl. DMA); server-runtime loop starts; slave/notification IRQ path exercised |
 
-**Not yet covered:**
-- Source address extraction from hardware (responder currently gets 0xFF/unavailable)
-- Multi-message queue and batching (responder processes one event at a time)
-- Blocking semantics with timeouts (responder relies on interrupt notification)
-- `ReadRequest` event delivery (slave RX complete, but TX-driven events deferred)
-- Hardware EVB (`--config=k_ast1060_evb`) — I2C is QEMU-verified only by current decision
-- Host-modeled IRQ — notification path is QEMU-only by decision
+**Critical gaps for SPDM (must fix before demo):**
+- ⚠️ `ReadRequest` event delivery — backend's `handle_slave_interrupt()` must
+  return `SlaveEvent::ReadRequest` and wake the client; currently only data
+  events wake the client
+- ⚠️ `Stop` event delivery — similarly, `SlaveEvent::Stop` must be returned and
+  propagated to client
+- ⚠️ Source address extraction — currently defaults to `0xFF`; backend must
+  read requester address from hardware registers
+
+**Not yet covered (lower priority):**
+- Multi-message queue and per-address state tracking (responder handles one event
+  at a time; multi-requester support TBD)
+- Blocking semantics with timeouts (responder uses interrupt notification; no
+  polling fallback yet)
+- Hardware EVB (`--config=k_ast1060_evb`) — I2C is QEMU-verified only by current
+  decision
 
 ## Status
 
