@@ -3,19 +3,18 @@
 
 //! I2C slave RX test app.
 //!
-//! Arms the AST1060 as an I2C slave at address 0x50 on Bus 2 via the IPC
+//! Arms the AST1060 as an I2C slave at address 0x42 on Bus 2 via the IPC
 //! server, then waits for `Signals::USER` (raised by the server when the
 //! hardware IRQ fires and the RX latch is filled). Drains the buffer via
 //! `slave_receive` and asserts the payload matches `EXPECTED_PAYLOAD`.
 //!
-//! Calls `debug_shutdown(Ok(()))` on pass, `debug_shutdown(Err(_))` on fail,
-//! which drives the kernel `shutdown(code)` → UART sentinel for the test
-//! harness.
+//! On success: logs "PASSED" and loops.
+//! On failure: logs the error and loops.
 //!
 //! # Prerequisite
 //!
 //! An external master (AST2600 or second EVB) must write `EXPECTED_PAYLOAD`
-//! to address 0x50 on I2C2 after "SLAVE READY" appears on UART.
+//! to address 0x42 on I2C2 after "SLAVE READY" appears on UART.
 
 #![no_main]
 #![no_std]
@@ -37,7 +36,6 @@ const EXPECTED_PAYLOAD: &[u8] = &[0xDE, 0xAD, 0xBE, 0xEF];
 macro_rules! fail {
     ($msg:literal) => {{
         pw_log::error!($msg);
-        let _ = syscall::debug_shutdown(Err(pw_status::Error::Internal));
         loop {}
     }};
 }
@@ -84,7 +82,6 @@ fn entry() {
             n as u32,
             EXPECTED_PAYLOAD.len() as u32,
         );
-        let _ = syscall::debug_shutdown(Err(pw_status::Error::DataLoss));
         loop {}
     }
 
@@ -93,12 +90,10 @@ fn entry() {
             "payload mismatch: got [{:02x} {:02x} {:02x} {:02x}]",
             rx[0] as u32, rx[1] as u32, rx[2] as u32, rx[3] as u32,
         );
-        let _ = syscall::debug_shutdown(Err(pw_status::Error::DataLoss));
         loop {}
     }
 
     pw_log::info!("I2C slave RX IPC test PASSED");
-    let _ = syscall::debug_shutdown(Ok(()));
     loop {}
 }
 
