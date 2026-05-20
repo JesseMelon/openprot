@@ -24,7 +24,7 @@
 
 #![no_std]
 
-use i2c_api::seam::{I2c, I2cBusRecovery, I2cSlaveBuffer, SevenBitAddress};
+use i2c_api::seam::{I2c, I2cBusRecovery, I2cSlaveBuffer, I2cSlaveEvent, I2cSEvent, SevenBitAddress};
 use i2c_api::{I2cError, I2cOp, I2cRequestHeader, I2cResponseHeader, SlaveEventKind, MAX_PAYLOAD_SIZE};
 use i2c_server::slave::dispatch_slave;
 use i2c_server::{dispatch, MAX_BUF_SIZE};
@@ -93,7 +93,7 @@ fn header(req: &[u8]) -> Option<(I2cOp, usize)> {
 /// with `wg`, then loops. `buses` must be non-empty with distinct channels.
 pub fn run<B>(wg: u32, irq_signals: Signals, buses: &mut [Bus<B>]) -> !
 where
-    B: I2c<SevenBitAddress> + I2cSlaveBuffer<SevenBitAddress> + I2cBusRecovery,
+    B: I2c<SevenBitAddress> + I2cSlaveBuffer<SevenBitAddress> + I2cSlaveEvent + I2cBusRecovery,
 {
     for bus in buses.iter() {
         if let Err(_) = syscall::wait_group_add(wg, bus.channel, Signals::READABLE, bus.channel as usize) {
@@ -118,22 +118,29 @@ where
             let acked = w.pending_signals & irq_signals;
             if let Some(bus) = buses.iter_mut().find(|b| b.irq == irq) {
                 if bus.notif_enabled {
-                    match bus.driver.poll_slave_data() {
-                        Ok(Some(_)) => {
-                            match bus.driver.read_slave_buffer(&mut bus.rx) {
-                                Ok(n) => {
-                                    if n > 0 {
-                                        bus.rx_len = n;
-                                        // Event kind is always DataReceived in the current model
-                                        // (hardware delivers complete buffers, not per-byte events).
-                                        bus.rx_event_kind = SlaveEventKind::DataReceived;
-                                        // Source address: placeholder until backend extracts it.
-                                        // For now, use 0xFF (invalid address) to signal unavailable.
-                                        bus.rx_source = 0xFF;
+                    match bus.driver.poll_slave_event() {
+                        Ok(Some((kind, _))) => {
+                            // Store the actual hardware event kind
+                            bus.rx_event_kind = match kind {
+                                I2cSEvent::SlaveWrRecvd => SlaveEventKind::DataReceived,
+                                I2cSEvent::SlaveRdReq => SlaveEventKind::ReadRequest,
+                                I2cSEvent::SlaveStop => SlaveEventKind::Stop,
+                                _ => SlaveEventKind::DataReceived,
+                            };
+                            // For DataReceived, read the buffer; other events have no data
+                            if kind == I2cSEvent::SlaveWrRecvd {
+                                match bus.driver.read_slave_buffer(&mut bus.rx) {
+                                    Ok(n) => {
+                                        if n > 0 {
+                                            bus.rx_len = n;
+                                            // Source address: placeholder until backend extracts it.
+                                            // For now, use 0xFF (invalid address) to signal unavailable.
+                                            bus.rx_source = 0xFF;
+                                        }
                                     }
-                                }
-                                Err(_) => {
-                                    pw_log::error!("read_slave_buffer failed");
+                                    Err(_) => {
+                                        pw_log::error!("read_slave_buffer failed");
+                                    }
                                 }
                             }
                         }
@@ -141,7 +148,7 @@ where
                             pw_log::debug!("slave IRQ fired but no data ready — spurious or non-data event");
                         }
                         Err(_) => {
-                            pw_log::error!("poll_slave_data failed");
+                            pw_log::error!("poll_slave_event failed");
                         }
                     }
                 }

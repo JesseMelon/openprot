@@ -8,4 +8,5 @@ pub mod seam;
 pub mod transport;
 
 pub use protocol::*;
+pub use seam::I2cSlaveEvent;
 pub use transport::{Transport, TransportError};

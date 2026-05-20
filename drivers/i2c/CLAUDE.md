@@ -8,30 +8,32 @@ reconstruction of the working memory for this effort (the `~/.claude` memory
 is machine-local and does not travel). Human-facing rationale:
 `drivers/i2c/README.md` and `ASSESSMENT-stack-facade-template.md` (repo root).
 
-## Status — slave-RX notification slice landed; SPDM responder still required
+## Status — Full SPDM Responder Required (Not Optional)
 
-Done: master `Transaction` path, **and** the thin slave-RX notification
-vertical slice — wire ops `ConfigureSlave`/`EnableSlave`/`DisableSlave`/
-`EnableSlaveNotification`/`DisableSlaveNotification`/`SlaveReceive`; the IRQ
-→ drain → per-bus latch → `object_set_peer_user_signal(USER)` path in
-`server-runtime`; client target methods (`configure_slave`/`enable_slave`/
-`enable_notification`/`slave_receive`/…). Seam = `openprot_hal_blocking::
-i2c_hardware::slave` (reused, after the I2cHardwareCore→ErrorType trait fix,
-commit `3add2ff`).
+The ocp-emea demo is a **full-blown SPDM requester/responder over MCTP/I2C**.
+The responder must correctly propagate event metadata and source addresses.
 
-**Required for SPDM responder support (ocp-emea demo):**
-- Event kind metadata (`DataReceived`, `ReadRequest`, `Stop`) in
-  `slave_receive_with_metadata()` — backend must return all event kinds from
-  `handle_slave_interrupt()`, not just data events
-- `slave_set_response()` — pre-load TX buffer for master's next read
-- Source address tracking — currently defaults to `0xFF`; backend must extract
-  from hardware registers
+**Done:**
+- Master `Transaction` path (requester role)
+- Slave RX notification slice (basic data reception)
+- Wire protocol: `SlaveEventKind` enum, all slave opcodes, `slave_receive_with_metadata()`
+- HAL seam: `I2cSlaveCore`, `I2cSlaveBuffer` (reused from `openprot_hal_blocking`)
 
-Deferred (not needed for SPDM base):
-multi-message queue; blocking `wait_for_messages` + timeouts; the
-`system.json5`/app wiring + MCTP-server integration that *consumes* the
-`USER` wake; host-modeled IRQ (notification path is QEMU-verified only, by
-decision).
+**CRITICAL — Required for full SPDM responder (demo blocker):**
+- Event kind metadata in `rx_event_kind` — `server-runtime` hardcodes `DataReceived`;
+  must propagate actual hardware event (ReadRequest, Stop) so responder can distinguish
+  transaction boundaries
+- Source address extraction — `rx_source` always `0xFF`; must extract master's 7-bit
+  I2C address from MCTP-I2C header so responder knows which device sent the message
+  (required for multi-requester scenarios)
+- `slave_set_response()` is implemented; responder can stage responses
+
+**Deferred (post-demo):**
+- ReadRequest event delivery to client (not needed for baseline SPDM; master write +
+  slave read response works via pre-staged buffer)
+- Multi-message queue and blocking semantics
+- `system.json5`/app wiring + MCTP-server integration
+- Host-modeled IRQ (QEMU-verified only, by decision)
 
 ## Confined-`unsafe` MMIO Façade (pattern conformance)
 

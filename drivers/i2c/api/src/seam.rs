@@ -29,6 +29,21 @@ pub use openprot_hal_blocking::i2c_hardware::{I2cBusRecovery, I2cHardwareCore};
 
 use crate::protocol::I2cError;
 
+/// Extension trait for slave-mode event polling with full event kind.
+/// Enables backends to return both the hardware event kind (ReadRequest, Stop, etc.)
+/// alongside the rx length, so the server-runtime can propagate correct metadata.
+/// Default impl delegates to `poll_slave_data()` for backward compatibility.
+pub trait I2cSlaveEvent: I2cSlaveBuffer {
+    /// Poll slave interrupt; return both event kind and rx length (if data received).
+    /// Default impl uses `poll_slave_data()` and reports DataReceived kind.
+    fn poll_slave_event(&mut self) -> Result<Option<(I2cSEvent, usize)>, Self::Error> {
+        Ok(self.poll_slave_data()?.map(|n| (I2cSEvent::SlaveWrRecvd, n)))
+    }
+}
+
+/// Blanket impl so all I2cSlaveBuffer types get the default behavior.
+impl<T: I2cSlaveBuffer> I2cSlaveEvent for T {}
+
 /// Map a wire status code onto the `embedded_hal::i2c::ErrorKind` taxonomy so
 /// the client can satisfy `embedded_hal::i2c::Error`.
 pub fn error_kind(err: I2cError) -> ErrorKind {

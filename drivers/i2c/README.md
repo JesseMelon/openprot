@@ -141,10 +141,10 @@ target needs it — not fabricated speculatively.
 
 ## SPDM responder implementation
 
-**Status:** ⚠️ **REQUIRED for ocp-emea demo. Slave RX complete; slave TX in progress.**
+**Status:** ⚠️ **REQUIRED for ocp-emea demo — full SPDM responder, not a subset.**
 
 The i2c driver supports SPDM requester/responder dual-role operation via
-interrupt-driven event notification with metadata. A responder app:
+interrupt-driven event notification with metadata. A responder must:
 
 ```rust
 client.configure_slave(RESPONDER_ADDR)?;
@@ -176,19 +176,25 @@ loop {
 ```
 
 **What's implemented:**
-- ✅ Slave RX data reception (`DataReceived` events)
-- ✅ Event metadata framework (kind + source address fields)
-- ✅ `slave_receive_with_metadata()` API
+- ✅ Slave RX data reception
+- ✅ Event metadata framework (fields exist but not populated)
+- ✅ `slave_receive_with_metadata()` API (client-side)
 - ✅ `slave_set_response()` API (wire protocol + server dispatch)
 - ✅ Server-runtime interrupt drain + per-bus latch
+- ✅ Wire protocol supports Stop events
 
-**What's required for SPDM:**
-- ⚠️ Backend must return `ReadRequest` and `Stop` events from
-  `handle_slave_interrupt()` — currently only data-reception events trigger
-  client wakeup
-- ⚠️ Source address extraction from hardware registers (currently defaults
-  to `0xFF`)
-- 🔄 Hardware EVB testing (`--config=k_ast1060_evb`) — currently QEMU-only
+**Critical gaps blocking full SPDM responder:**
+- ❌ Event kind propagation — `rx_event_kind` hardcoded to `DataReceived`;
+  responder cannot distinguish `Stop` event (transaction boundary)
+- ❌ Source address extraction — `rx_source` hardcoded to `0xFF`; responder
+  cannot identify which requester sent the message
+- ❌ `poll_slave_event()` missing from HAL — backend must return event kind
+  alongside rx length so server-runtime can store it
+
+**Post-demo (not blocking):**
+- ReadRequest event delivery — needed for responder state machines; baseline SPDM
+  works via pre-staged TX buffer
+- Hardware EVB testing (`--config=k_ast1060_evb`) — currently QEMU-only
 
 Seam = `openprot_hal_blocking::i2c_hardware::slave` (`I2cSlaveCore`/`Buffer`),
 reused. IRQ→USER notification path is QEMU-verified only (by decision); host
@@ -196,11 +202,12 @@ tests verify wire codec and server dispatch logic.
 
 **Reference implementation:** See branch `openprot/ocp-emea-demo-stack-facade`
 (commit `610d1f0`, "mctp: wire real I2C transport into server loop"). It shows
-how the MCTP server multiplexes IPC client requests and I2C slave notifications
-via a WaitGroup, decodes incoming MCTP-I2C packets, and routes them to the MCTP
-stack. The transport-i2c crate (`MctpI2cReceiver`) handles MCTP framing strip
-and PEC validation; the i2c_client exposes `register_notification()` and
-`get_pending_messages()` for fetching slave events.
+MCTP server wiring (WaitGroup multiplex, `get_pending_messages()`, `MctpI2cReceiver`).
+**However:** that branch used aspeed-ddk as an external dependency, which has
+architectural gaps (Stop/ReadRequest events dropped, no source address at driver
+layer). The stack-facade MCTP layer works around this by extracting source address
+from the MCTP-I2C payload byte[3], but that is not a substitute for proper driver
+support. This repo owns the i2c peripheral code and must implement it correctly.
 
 ## Test matrix
 
