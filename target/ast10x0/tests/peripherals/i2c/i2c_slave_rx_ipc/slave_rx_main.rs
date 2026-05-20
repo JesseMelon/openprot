@@ -28,7 +28,7 @@ use userspace::syscall::{self, Signals};
 use userspace::time::Instant;
 
 /// Slave address the test listens on.
-const SLAVE_ADDR: u8 = 0x50;
+const SLAVE_ADDR: u8 = 0x42;
 
 /// Payload the external master must send. Coordinate with whoever drives the
 /// master EVB/script.

@@ -65,7 +65,7 @@ A2. unsafe { board.init() }           SCU clock/reset + pin-mux + init_bus(2)
 Phase B — configure slave and wait
 ────────────────────────────────────
 B1. board.open_bus(BUS_2, &SLAVE_CFG) → driver: Ast1060I2c
-B2. driver.configure_slave_address(0x50)
+B2. driver.configure_slave_address(0x42)
 B3. driver.enable_slave_mode()
 B4. [print "SLAVE READY — start external master now"]
 
@@ -89,7 +89,7 @@ E2. driver.disable_slave_mode()
 
 **External master script** (run after "SLAVE READY" appears on UART):
 ```
-transaction(0x50, [Write(&[0xDE, 0xAD, 0xBE, 0xEF])])
+transaction(0x42, [Write(&[0xDE, 0xAD, 0xBE, 0xEF])])
 ```
 Agree the payload constant between the slave binary and whoever drives the master.
 
