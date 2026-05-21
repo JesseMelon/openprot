@@ -157,8 +157,7 @@ impl<T: Transport> I2cClient<T> {
     /// the byte count, or `Err(ServerError(I2cError::NoData))` if nothing is
     /// pending — call this after a `Signals::USER` wake on the channel.
     pub fn slave_receive(&mut self, buf: &mut [u8]) -> Result<usize, ClientError> {
-        let max = buf.len().min(MAX_PAYLOAD_SIZE) as u16;
-        self.slave_cmd(I2cOp::SlaveReceive, 0, max, Some(buf))
+        Ok(self.slave_receive_with_metadata(buf)?.data_len)
     }
 
     /// Fetch the latched slave-RX bytes and metadata into `buf` (non-blocking).

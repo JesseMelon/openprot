@@ -317,16 +317,21 @@ impl<Y: FnMut(u32)> Ast1060I2c<'_, Y> {
     pub fn slave_read(&mut self, buffer: &mut [u8]) -> Result<usize, I2cError> {
         // Get receive length from buffer length register
         if self.xfer_mode == I2cXferMode::BufferMode {
-            let len = self
+            // AST_I2CC_SLAVE_PKT_SAVE_ADDR (I2CC00 bit 20) deposits the I2C
+            // address byte at buffer offset 0. Read the raw count once, subtract
+            // 1 for that byte, then copy only the payload (skipping offset 0).
+            let raw = self
                 .regs()
                 .i2cc0c()
                 .read()
                 .actual_rxd_pool_buffer_size()
                 .bits() as usize;
-            let to_read = len.min(buffer.len()).min(BUFFER_SIZE);
+            let data_len = raw.saturating_sub(1);
+            let to_read = data_len.min(buffer.len()).min(BUFFER_SIZE - 1);
 
-            // Read from buffer
-            self.copy_from_buffer(&mut buffer[..to_read])?;
+            let mut tmp = [0u8; BUFFER_SIZE];
+            self.copy_from_buffer(&mut tmp[..1 + to_read])?;
+            buffer[..to_read].copy_from_slice(&tmp[1..1 + to_read]);
 
             // Re-enable RX buffer
             let mut cmd = constants::AST_I2CS_ACTIVE_ALL | constants::AST_I2CS_PKT_MODE_EN;
@@ -338,13 +343,15 @@ impl<Y: FnMut(u32)> Ast1060I2c<'_, Y> {
             Ok(to_read)
         } else if self.xfer_mode == I2cXferMode::DmaMode {
             // DMA mode: the hardware has already DMA'd into `self.dma_buf`.
-            // Read actual received byte count from the DMA status register.
+            // AST_I2CC_SLAVE_PKT_SAVE_ADDR deposits the address byte at dma_buf[0];
+            // subtract 1 and skip it, matching the buffer-mode treatment above.
             let hw_len = self.regs().i2cs4c().read().dmarx_actual_len_byte().bits() as usize;
-            let to_read = hw_len.min(buffer.len());
+            let data_len = hw_len.saturating_sub(1);
+            let to_read = data_len.min(buffer.len());
 
             if let Some(dma_buf) = self.slave_dma_buf.as_deref() {
-                let src_len = to_read.min(dma_buf.len());
-                buffer[..src_len].copy_from_slice(&dma_buf[..src_len]);
+                let src_len = to_read.min(dma_buf.len().saturating_sub(1));
+                buffer[..src_len].copy_from_slice(&dma_buf[1..1 + src_len]);
             }
 
             // Re-arm slave DMA for next receive

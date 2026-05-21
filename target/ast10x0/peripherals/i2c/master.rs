@@ -616,7 +616,7 @@ impl<Y: FnMut(u32)> Ast1060I2c<'_, Y> {
             // Copy from master DMA buffer into caller's buffer
             {
                 let dma_buf = self.master_dma_buf.as_deref().ok_or(I2cError::Invalid)?;
-                buffer[offset..offset + chunk_len].copy_from_slice(&dma_buf[..chunk_len]);
+                buffer.get_mut(offset..offset + chunk_len).ok_or(I2cError::Invalid)?.copy_from_slice(dma_buf.get(..chunk_len).ok_or(I2cError::Invalid)?);
             }
 
             #[allow(clippy::cast_possible_truncation)]

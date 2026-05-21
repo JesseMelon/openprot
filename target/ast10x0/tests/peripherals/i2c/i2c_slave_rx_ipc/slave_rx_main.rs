@@ -7,14 +7,6 @@
 //! server, then waits for `Signals::USER` (raised by the server when the
 //! hardware IRQ fires and the RX latch is filled). Drains the buffer via
 //! `slave_receive` and asserts the payload matches `EXPECTED_PAYLOAD`.
-//!
-//! On success: logs "PASSED" and loops.
-//! On failure: logs the error and loops.
-//!
-//! # Prerequisite
-//!
-//! An external master (AST2600 or second EVB) must write `EXPECTED_PAYLOAD`
-//! to address 0x42 on I2C2 after "SLAVE READY" appears on UART.
 
 #![no_main]
 #![no_std]
@@ -29,13 +21,13 @@ use userspace::time::Instant;
 /// Slave address the test listens on.
 const SLAVE_ADDR: u8 = 0x42;
 
-/// Payload the external master must send. Coordinate with whoever drives the
-/// master EVB/script.
+/// Payload the master binary sends.
 const EXPECTED_PAYLOAD: &[u8] = &[0xDE, 0xAD, 0xBE, 0xEF];
 
 macro_rules! fail {
     ($msg:literal) => {{
         pw_log::error!($msg);
+        let _ = syscall::debug_shutdown(Err(pw_status::Error::Internal));
         loop {}
     }};
 }
@@ -56,7 +48,7 @@ fn entry() {
     }
 
     pw_log::info!(
-        "SLAVE READY addr=0x{:02x} — start external master now",
+        "SLAVE READY addr=0x{:02x} — waiting for master",
         SLAVE_ADDR as u32,
     );
 
@@ -82,6 +74,7 @@ fn entry() {
             n as u32,
             EXPECTED_PAYLOAD.len() as u32,
         );
+        let _ = syscall::debug_shutdown(Err(pw_status::Error::DataLoss));
         loop {}
     }
 
@@ -90,10 +83,12 @@ fn entry() {
             "payload mismatch: got [{:02x} {:02x} {:02x} {:02x}]",
             rx[0] as u32, rx[1] as u32, rx[2] as u32, rx[3] as u32,
         );
+        let _ = syscall::debug_shutdown(Err(pw_status::Error::DataLoss));
         loop {}
     }
 
     pw_log::info!("I2C slave RX IPC test PASSED");
+    let _ = syscall::debug_shutdown(Ok(()));
     loop {}
 }
 

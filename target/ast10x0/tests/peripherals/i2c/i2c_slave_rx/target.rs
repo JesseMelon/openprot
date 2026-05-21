@@ -16,10 +16,9 @@ use target_common::{TargetInterface, declare_target};
 pub struct Target {}
 
 /// Slave address the test binary listens on.
-const SLAVE_ADDR: u8 = 0x50;
+const SLAVE_ADDR: u8 = 0x42;
 
-/// Payload the external master must send.  Agree this constant between the
-/// slave binary and whatever script drives the master EVB.
+/// Payload the master binary sends.
 const EXPECTED_PAYLOAD: &[u8] = &[0xDE, 0xAD, 0xBE, 0xEF];
 
 /// Bus 2 config: standard-speed buffer-mode, no SMBus timeout.
@@ -49,7 +48,7 @@ fn i2c_error_str(error: I2cError) -> &'static str {
 }
 
 fn run_slave_rx_test() -> Result<(), &'static str> {
-    pw_log::info!("=== AST10x0 I2C slave RX test (Bus 2, addr 0x50) ===");
+    pw_log::info!("=== AST10x0 I2C slave RX test (Bus 2, addr 0x42) ===");
 
     // Phase A — board init: SCU clock/reset + pin-mux + init_bus(2).
     let board = Ast10x0Board::new(Ast10x0BoardDescriptor {
