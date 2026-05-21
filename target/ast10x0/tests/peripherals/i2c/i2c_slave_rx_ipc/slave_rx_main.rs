@@ -48,7 +48,7 @@ fn entry() {
     }
 
     pw_log::info!(
-        "SLAVE READY addr=0x{:02x} — waiting for master",
+        "SLAVE READY addr=0x{:02x} — start external master now",
         SLAVE_ADDR as u32,
     );
 
@@ -60,25 +60,25 @@ fn entry() {
 
     // Drain the latched bytes from the server.
     let mut rx = [0u8; 32];
-    let n = match client.slave_receive(&mut rx) {
-        Ok(n) => n,
+    let event = match client.slave_receive(&mut rx) {
+        Ok(event) => event,
         Err(_) => fail!("slave_receive failed"),
     };
 
-    pw_log::info!("Received {} byte(s)", n as u32);
+    pw_log::info!("Received {} byte(s)", event.data_len as u32);
 
     // Assert length and payload content.
-    if n != EXPECTED_PAYLOAD.len() {
+    if event.data_len != EXPECTED_PAYLOAD.len() {
         pw_log::error!(
             "length mismatch: got {} expected {}",
-            n as u32,
+            event.data_len as u32,
             EXPECTED_PAYLOAD.len() as u32,
         );
         let _ = syscall::debug_shutdown(Err(pw_status::Error::DataLoss));
         loop {}
     }
 
-    if &rx[..n] != EXPECTED_PAYLOAD {
+    if &rx[..event.data_len] != EXPECTED_PAYLOAD {
         pw_log::error!(
             "payload mismatch: got [{:02x} {:02x} {:02x} {:02x}]",
             rx[0] as u32, rx[1] as u32, rx[2] as u32, rx[3] as u32,

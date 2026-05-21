@@ -153,19 +153,12 @@ impl<T: Transport> I2cClient<T> {
             .map(|_| ())
     }
 
-    /// Fetch the latched slave-RX bytes into `buf` (non-blocking). Returns
-    /// the byte count, or `Err(ServerError(I2cError::NoData))` if nothing is
-    /// pending — call this after a `Signals::USER` wake on the channel.
-    pub fn slave_receive(&mut self, buf: &mut [u8]) -> Result<usize, ClientError> {
-        Ok(self.slave_receive_with_metadata(buf)?.data_len)
-    }
-
     /// Fetch the latched slave-RX bytes and metadata into `buf` (non-blocking).
     /// Returns event kind, source address, and data length.
     /// Call this after a `Signals::USER` wake on the channel.
     ///
     /// Response payload format: [kind (1), source_addr (1), data (0..)]
-    pub fn slave_receive_with_metadata(
+    pub fn slave_receive(
         &mut self,
         buf: &mut [u8],
     ) -> Result<SlaveReceiveEvent, ClientError> {
