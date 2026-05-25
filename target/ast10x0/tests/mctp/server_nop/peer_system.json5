@@ -17,7 +17,7 @@
     apps: [
         {
             name: "i2c_server_peer",
-            flash_size_bytes: 131072,
+            flash_size_bytes: 65536,
             processes: [
                 {
                     name: "i2c_server_peer_process",
@@ -60,16 +60,55 @@
             ],
         },
         {
-            name: "mctp_nop_shutdown_peer",
-            flash_size_bytes: 32768,
+            name: "mctp_server_peer",
+            flash_size_bytes: 65536,
             processes: [
                 {
-                    name: "mctp_nop_shutdown_peer_process",
-                    ram_size_bytes: 16384,
-                    objects: [],
+                    name: "mctp_server_peer_process",
+                    ram_size_bytes: 65536,
+                    objects: [
+                        {
+                            name: "wg",
+                            type: "wait_group",
+                        },
+                        {
+                            name: "mctp",
+                            type: "channel_handler",
+                        },
+                        {
+                            name: "i2c",
+                            type: "channel_initiator",
+                            handler_process: "i2c_server_peer_process",
+                            handler_object_name: "i2c",
+                        },
+                    ],
                     threads: [
                         {
-                            name: "mctp_nop_shutdown_peer_thread",
+                            name: "mctp_server_peer_thread",
+                            kernel_stack_size_bytes: 4096,
+                        },
+                    ],
+                },
+            ],
+        },
+        {
+            name: "mctp_echo_client_peer",
+            flash_size_bytes: 65536,
+            processes: [
+                {
+                    name: "mctp_echo_client_peer_process",
+                    ram_size_bytes: 32768,
+                    objects: [
+                        {
+                            name: "mctp",
+                            type: "channel_initiator",
+                            handler_process: "mctp_server_peer_process",
+                            handler_object_name: "mctp",
+                        },
+                    ],
+                    threads: [
+                        {
+                            name: "mctp_echo_client_peer_thread",
                             kernel_stack_size_bytes: 2048,
                         },
                     ],
