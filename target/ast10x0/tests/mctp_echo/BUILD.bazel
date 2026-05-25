@@ -111,5 +111,6 @@ system_image(
 system_image_test(
     name = "mctp_echo_test",
     image = ":mctp_echo_image",
+    tags = ["qemu_only"],
     target_compatible_with = TARGET_COMPATIBLE_WITH,
 )
