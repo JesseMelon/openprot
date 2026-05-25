@@ -11,8 +11,8 @@
 use i2c_api::SlaveEventKind;
 use i2c_client::I2cClient;
 use i2c_client_ipc::IpcTransport;
-use openprot_mctp_api::wire::{self, MctpRequestHeader, MAX_PAYLOAD_SIZE, MAX_REQUEST_SIZE, MAX_RESPONSE_SIZE};
-use openprot_mctp_api::ResponseCode;
+use openprot_mctp_api::wire::{self, MctpOp, MctpRequestHeader, MAX_PAYLOAD_SIZE, MAX_REQUEST_SIZE, MAX_RESPONSE_SIZE};
+use openprot_mctp_api::{Handle, ResponseCode};
 use openprot_mctp_server::dispatch;
 use openprot_mctp_transport_i2c::{I2cSender, MctpI2cReceiver};
 
@@ -101,6 +101,28 @@ fn mctp_server_loop() -> Result<()> {
                 }
                 Err(_) => {
                     pw_log::error!("slave_receive failed");
+                }
+            }
+            if let Some(pending) = pending_recv.as_ref() {
+                if let Some(meta) = server.try_recv(pending.handle, &mut recv_buf) {
+                    let payload = &recv_buf[..meta.payload_size];
+                    let response_len = openprot_mctp_api::wire::encode_recv_response(
+                        &mut response_buf,
+                        meta.msg_type,
+                        meta.msg_ic,
+                        meta.remote_eid,
+                        meta.msg_tag,
+                        payload,
+                    )
+                    .unwrap_or_else(|_| {
+                        openprot_mctp_api::wire::encode_error_response(
+                            &mut response_buf,
+                            ResponseCode::InternalError,
+                        )
+                        .unwrap_or(0)
+                    });
+                    syscall::channel_respond(handle::MCTP, &response_buf[..response_len])?;
+                    pending_recv = None;
                 }
             }
         } else {
