@@ -166,7 +166,7 @@ class UartMonitor:
                 except (binascii.Error, ValueError):
                     result = None
 
-                if result is not None and result.ok():
+                if result is not None:
                     decoded_str = str(result)
                     print(f"\033[32m{decoded_str}\033[0m", end="", flush=True)
                     self._write_log(decoded_str)

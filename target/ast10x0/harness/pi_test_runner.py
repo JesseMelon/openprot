@@ -86,26 +86,32 @@ _FAILURE_SENTINELS = [b"TEST_RESULT:FAIL", b"panic"]
 def _stream_uart(port: serial.Serial, timeout: int, lock=None) -> bool:
     port.timeout = 1.0
     deadline = time.time() + timeout if timeout else None
-    buf = b""
+    sentinel_buf = b""
+    line_buf = b""
     while True:
         if deadline and time.time() >= deadline:
             print("Timeout waiting for test result sentinel", file=sys.stderr)
             return False
         data = port.read(1024)
         if data:
-            try:
-                with lock or nullcontext():
-                    sys.stdout.buffer.write(data)
-                    sys.stdout.buffer.flush()
-            except (BrokenPipeError, OSError):
-                return False
-            buf += data
-            if _SUCCESS_SENTINEL in buf:
+            line_buf += data
+            newline_pos = line_buf.rfind(b"\n")
+            if newline_pos >= 0:
+                to_write = line_buf[: newline_pos + 1]
+                line_buf = line_buf[newline_pos + 1 :]
+                try:
+                    with lock or nullcontext():
+                        sys.stdout.buffer.write(to_write)
+                        sys.stdout.buffer.flush()
+                except (BrokenPipeError, OSError):
+                    return False
+            sentinel_buf += data
+            if _SUCCESS_SENTINEL in sentinel_buf:
                 return True
             for s in _FAILURE_SENTINELS:
-                if s in buf:
+                if s in sentinel_buf:
                     return False
-            buf = buf[-256:]
+            sentinel_buf = sentinel_buf[-256:]
 
 
 def _run_paired(args, firmware_path: Path, slave_firmware_path: Path) -> bool:
