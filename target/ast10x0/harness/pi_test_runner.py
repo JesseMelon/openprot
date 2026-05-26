@@ -133,15 +133,15 @@ def _run_paired(args, firmware_path: Path, slave_firmware_path: Path) -> bool:
         return False
 
     try:
-        _sequence_to_fwspick_mode(args.srst_pin, args.fwspick_pin, port_a)
-        if not _wait_for_uart_ready(port_a):
-            return False
-        _upload_firmware(port_a, firmware_path)
-
         _sequence_to_fwspick_mode(args.slave_srst_pin, args.slave_fwspick_pin, port_b)
         if not _wait_for_uart_ready(port_b):
             return False
         _upload_firmware(port_b, slave_firmware_path)
+
+        _sequence_to_fwspick_mode(args.srst_pin, args.fwspick_pin, port_a)
+        if not _wait_for_uart_ready(port_a):
+            return False
+        _upload_firmware(port_a, firmware_path)
 
         results = [None, None]
 
