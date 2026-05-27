@@ -128,3 +128,125 @@ impl<C: I2c<u8>> mctp_lib::Sender for I2cSender<C> {
         MCTP_I2C_MAXMTU
     }
 }
+
+#[cfg(test)]
+mod tests {
+    extern crate std;
+    use std::cell::RefCell;
+    use std::vec::Vec;
+
+    use mctp::Eid;
+
+    use i2c_api::seam::{ErrorKind, ErrorType, I2c, I2cBusError, Operation, SevenBitAddress};
+    use i2c_client::I2cClient;
+    use i2c_server::loopback::LoopbackTransport;
+    use openprot_mctp_server::Server;
+
+    use super::I2cSender;
+    use crate::MctpI2cReceiver;
+
+    // A bus that records every write() payload verbatim. Reads are not needed
+    // since MCTP-over-I2C is master-write only for outbound packets.
+    struct CaptureBus<'a> {
+        writes: &'a RefCell<Vec<Vec<u8>>>,
+        addr: &'a RefCell<Vec<u8>>,
+    }
+
+    #[derive(Debug)]
+    struct CaptureErr;
+    impl I2cBusError for CaptureErr {
+        fn kind(&self) -> ErrorKind {
+            ErrorKind::Other
+        }
+    }
+    impl ErrorType for CaptureBus<'_> {
+        type Error = CaptureErr;
+    }
+    impl I2c<SevenBitAddress> for CaptureBus<'_> {
+        fn transaction(
+            &mut self,
+            address: SevenBitAddress,
+            operations: &mut [Operation<'_>],
+        ) -> Result<(), Self::Error> {
+            for op in operations.iter() {
+                if let Operation::Write(bytes) = op {
+                    self.writes.borrow_mut().push(bytes.to_vec());
+                    self.addr.borrow_mut().push(address);
+                }
+            }
+            Ok(())
+        }
+    }
+
+    // Drive Server::send() to push a message through I2cSender and capture the
+    // raw I2C frames, then decode them with MctpI2cReceiver and assert the
+    // payload survives the round-trip.
+    #[test]
+    fn sender_receiver_roundtrip() {
+        let writes: RefCell<Vec<Vec<u8>>> = RefCell::new(Vec::new());
+        let addrs: RefCell<Vec<u8>> = RefCell::new(Vec::new());
+
+        const OWN_ADDR: u8 = 0x10;
+        const REMOTE_ADDR: u8 = 0x42;
+        const OWN_EID: u8 = 8;
+        const REMOTE_EID: u8 = 48;
+        const MSG_TYPE: u8 = 0x05; // SPDM
+
+        let bus = CaptureBus { writes: &writes, addr: &addrs };
+        let transport = LoopbackTransport::new(bus);
+        let i2c_client = I2cClient::new(transport);
+        let sender = I2cSender::new(i2c_client, OWN_ADDR, REMOTE_ADDR);
+
+        let mut server: Server<I2cSender<I2cClient<LoopbackTransport<CaptureBus<'_>>>>, 16> =
+            Server::new(Eid(OWN_EID), 0, sender);
+
+        let payload = b"hello mctp";
+        let req_handle = server.req(REMOTE_EID).unwrap();
+        server
+            .send(Some(req_handle), MSG_TYPE, None, None, false, payload)
+            .unwrap();
+
+        // I2cSender skips the first byte (dest addr) before calling i2c.write(),
+        // so CaptureBus sees [cmd][byte_count][src_addr][mctp_hdr...][payload][PEC].
+        // MctpI2cReceiver::decode() expects the full SMBus frame including the
+        // leading dest addr byte. Prepend it before decoding.
+        let captured = writes.borrow();
+        assert!(!captured.is_empty(), "no I2C writes captured");
+
+        let receiver = MctpI2cReceiver::new(REMOTE_ADDR);
+
+        // Reconstruct the full SMBus frame: [dest_addr_byte] + captured write bytes.
+        // The dest addr byte is REMOTE_ADDR << 1 (write bit = 0).
+        let mut full_frame = Vec::new();
+        full_frame.push(REMOTE_ADDR << 1);
+        full_frame.extend_from_slice(&captured[0]);
+
+        let (mctp_pkt, i2c_hdr) = receiver.decode(&full_frame).expect("decode failed");
+
+        // source is already a 7-bit address per MctpI2cHeader docs.
+        assert_eq!(i2c_hdr.source, OWN_ADDR, "source address mismatch");
+
+        // The MCTP packet payload starts after the 4-byte MCTP transport header
+        // and the 1-byte message type field.
+        assert!(mctp_pkt.len() >= 5, "MCTP packet too short");
+        let msg_type_byte = mctp_pkt[4];
+        assert_eq!(msg_type_byte & 0x7F, MSG_TYPE, "message type mismatch");
+        assert_eq!(&mctp_pkt[5..], payload, "payload mismatch");
+    }
+
+    // A payload that fits in one fragment should produce exactly one I2C write.
+    #[test]
+    fn single_fragment_produces_one_write() {
+        let writes: RefCell<Vec<Vec<u8>>> = RefCell::new(Vec::new());
+        let addrs: RefCell<Vec<u8>> = RefCell::new(Vec::new());
+
+        let bus = CaptureBus { writes: &writes, addr: &addrs };
+        let sender = I2cSender::new(I2cClient::new(LoopbackTransport::new(bus)), 0x10, 0x42);
+        let mut server: Server<_, 16> = Server::new(Eid(8), 0, sender);
+
+        let req = server.req(48).unwrap();
+        server.send(Some(req), 1, None, None, false, b"short").unwrap();
+
+        assert_eq!(writes.borrow().len(), 1, "expected exactly one I2C write for a short payload");
+    }
+}
