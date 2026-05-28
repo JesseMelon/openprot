@@ -78,10 +78,10 @@ fn mctp_server_loop() -> Result<()> {
                     let resp = openprot_mctp_api::wire::MctpResponseHeader::error(ResponseCode::TimedOut);
                     response_buf[..openprot_mctp_api::wire::MctpResponseHeader::SIZE]
                         .copy_from_slice(&resp.to_bytes());
-                    syscall::channel_respond(
+                    let _ = syscall::channel_respond(
                         handle::MCTP,
                         &response_buf[..openprot_mctp_api::wire::MctpResponseHeader::SIZE],
-                    )?;
+                    );
                 }
                 continue;
             }
@@ -126,6 +126,9 @@ fn mctp_server_loop() -> Result<()> {
                 }
             }
         } else {
+            if pending_recv.is_some() {
+                pw_log::warn!("mctp_server peer: READABLE re-fired with pending_recv active — kernel holds signal until channel_respond");
+            }
             let len = syscall::channel_read(handle::MCTP, 0, &mut request_buf)?;
 
             if len < MctpRequestHeader::SIZE {

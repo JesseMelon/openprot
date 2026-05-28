@@ -97,7 +97,7 @@
         },
         {
             name: "mctp_echo_client",
-            flash_size_bytes: 65536,
+            flash_size_bytes: 16384,
             processes: [
                 {
                     name: "mctp_echo_client_process",
