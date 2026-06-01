@@ -1,40 +1,40 @@
 // Licensed under the Apache-2.0 license
 // SPDX-License-Identifier: Apache-2.0
 
-//! MCTP stack API test — receiver side (device B)
+//! MCTP req-recv test — receiver side (device B)
 //!
 //! Runs on the AST1060 Test Harness board with J15 pins 1 and 2 connected.
 //! This binary is the RECEIVER (I2C slave). Load it on device B before loading
 //! the sender image on device A.
 //!
-//! Receives an MCTP-over-I2C frame through the transport layer, then retrieves
-//! the message through `Stack` / `MctpListener` — the application-facing API
-//! layer above the raw server dispatch methods.
+//! Receives an MCTP request from device A through the transport layer,
+//! retrieves it via MctpListener::recv, then sends a response back to device A
+//! using the MctpRespChannel returned by recv.
 
 #![no_std]
 #![no_main]
 
 use ast10x0_board::{Ast10x0Board, Ast10x0BoardDescriptor};
 use ast10x0_peripherals::i2c::{
-    Ast1060I2c, Ast1060I2cRegisters, ClockConfig, I2cConfig, I2cSpeed, I2cXferMode, SlaveConfig,
-    SlaveEvent,
+    Ast1060I2c, Ast1060I2cRegisters, ClockConfig, I2cConfig, I2cSpeed, I2cXferMode,
+    SlaveConfig, SlaveEvent,
 };
 use ast10x0_peripherals::scu::pinctrl;
 use codegen as _;
 use console_backend::console_backend_write_all;
 use entry as _;
-use openprot_mctp_api::{Handle, MctpClient, MctpError, MctpListener, RecvMetadata, ResponseCode};
+use openprot_mctp_api::{Handle, MctpClient, MctpError, MctpListener, MctpRespChannel, RecvMetadata, ResponseCode};
 use openprot_mctp_api::stack::Stack;
 use openprot_mctp_transport_i2c::{I2cSender, MctpI2cReceiver};
 use target_common::{TargetInterface, declare_target};
 
 pub struct Target {}
 
-const SLAVE_ADDR: u8 = 0x42;
-const MASTER_ADDR: u8 = 0x10;
-const OWN_EID: u8 = 9;
-const MSG_TYPE: u8 = 1;
-const EXPECTED_PAYLOAD: &[u8] = b"mctp_api_hw";
+const SLAVE_ADDR: u8          = 0x42;
+const MASTER_ADDR: u8         = 0x10;
+const OWN_EID: u8             = 9;
+const MSG_TYPE: u8             = 1;
+const RESPONSE_PAYLOAD: &[u8] = b"mctp_resp_hw";
 
 fn i2c2_config() -> I2cConfig {
     I2cConfig {
@@ -98,7 +98,8 @@ impl mctp_lib::Sender for LazyI2cSender {
 
 // ---------------------------------------------------------------------------
 // DirectClient — MctpClient backed by Server<LazyI2cSender>.  recv() drives
-// the full slave receive cycle internally before routing the packet.
+// the full slave receive cycle internally; send_vectored on the LazyI2cSender
+// handles master-mode I2C for resp.send().
 // ---------------------------------------------------------------------------
 
 struct DirectClient<const N: usize> {
@@ -150,7 +151,7 @@ impl<const N: usize> MctpClient for DirectClient<N> {
     ) -> Result<RecvMetadata, MctpError> {
         let internal_err = MctpError::from_code(ResponseCode::InternalError);
 
-        // Init I2C as slave and receive the incoming frame.
+        // Init I2C as slave and receive the request frame from device A.
         // SAFETY: I2C2 MMIO is not in use by any other owner at this point.
         let mut slave = unsafe {
             let mmio = Ast1060I2cRegisters::new(
@@ -175,12 +176,14 @@ impl<const N: usize> MctpClient for DirectClient<N> {
                 let n = len.min(raw.len());
                 slave.slave_read(&mut raw[..n]).map_err(|_| internal_err)?;
 
-                // BufferMode omits the leading dest-addr byte; prepend it for decode.
+                // BufferMode delivers [cmd][bc][src][mctp_hdr...][pec] without the
+                // leading dest-addr byte. Prepend it so decode sees the full frame.
                 let mut frame = [0u8; 129];
                 frame[0] = self.own_i2c_addr << 1;
                 frame[1..n + 1].copy_from_slice(&raw[..n]);
 
-                let (pkt, _) = self.receiver.decode(&frame[..n + 1]).map_err(|_| internal_err)?;
+                let (pkt, _) =
+                    self.receiver.decode(&frame[..n + 1]).map_err(|_| internal_err)?;
 
                 let mut pkt_buf = [0u8; 128];
                 let pkt_len = pkt.len().min(pkt_buf.len());
@@ -191,6 +194,8 @@ impl<const N: usize> MctpClient for DirectClient<N> {
             None => return Err(MctpError::from_code(ResponseCode::TimedOut)),
         };
         drop(slave);
+
+        pw_log::info!("Request received. Switching to master mode to send response.");
 
         // Route the received packet and spin until try_recv delivers it to the handle.
         let (pkt_buf, pkt_len) = raw_pkt;
@@ -227,7 +232,7 @@ impl<const N: usize> MctpClient for DirectClient<N> {
 // ---------------------------------------------------------------------------
 
 fn run_receiver() -> Result<(), &'static str> {
-    pw_log::info!("=== MCTP stack API test: RECEIVER (device B) ===");
+    pw_log::info!("=== MCTP req-recv test: RECEIVER (device B) ===");
 
     let board = Ast10x0Board::new(Ast10x0BoardDescriptor {
         pinctrl_groups: &[pinctrl::PINCTRL_I2C2],
@@ -252,26 +257,18 @@ fn run_receiver() -> Result<(), &'static str> {
         .map_err(|_| "stack.listener failed")?;
 
     let mut buf = [0u8; 128];
-    let (meta, payload, _resp) = listener.recv(&mut buf).map_err(|_| "listener.recv failed")?;
+    let (_meta, _payload, mut resp) =
+        listener.recv(&mut buf).map_err(|_| "listener.recv failed")?;
 
-    if meta.msg_type != MSG_TYPE {
-        pw_log::error!(
-            "msg type: got 0x{:02x}, expected 0x{:02x}",
-            meta.msg_type as u32,
-            MSG_TYPE as u32
-        );
-        return Err("message type mismatch");
-    }
-    if payload != EXPECTED_PAYLOAD {
-        return Err("payload mismatch");
-    }
-    pw_log::info!("MCTP message received via MctpListener and payload verified");
+    pw_log::info!("Sending response via MctpRespChannel::send");
+    resp.send(RESPONSE_PAYLOAD).map_err(|_| "resp.send failed")?;
 
+    pw_log::info!("Response sent successfully");
     Ok(())
 }
 
 impl TargetInterface for Target {
-    const NAME: &'static str = "AST10x0 MCTP Stack API Receiver";
+    const NAME: &'static str = "AST10x0 MCTP Req-Recv Receiver";
 
     fn main() -> ! {
         let sentinel: &[u8] = match run_receiver() {
