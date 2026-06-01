@@ -21,7 +21,7 @@ static UART_LOCK: SpinLock<arch_arm_cortex_m::Arch, ()> = SpinLock::new(());
 
 #[unsafe(no_mangle)]
 pub fn console_backend_write_all(buf: &[u8]) -> Result<()> {
-    let some(_lock) = UART_LOCK.lock(arch_arm_cortex_m::Arch) else {
+    let Some(_lock) = UART_LOCK.try_lock(arch_arm_cortex_m::Arch) else {
         return Ok(());
     };
     // UART is configured by ROM/bootloader before firmware starts.

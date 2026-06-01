@@ -13,7 +13,6 @@ use userspace::{entry, syscall};
 const ECHO_EID: u8 = 8;
 const PEER_EID: u8 = 9;
 const LISTEN_TIMEOUT_MS: u32 = 100;
-
 #[entry]
 fn entry() {
     let stack = Stack::new(IpcMctpClient::new(app_mctp_echo_client::handle::MCTP));

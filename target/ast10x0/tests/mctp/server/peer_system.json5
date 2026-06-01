@@ -115,22 +115,5 @@
                 },
             ],
         },
-        {
-            name: "mctp_shutdown_app_peer",
-            flash_size_bytes: 32768,
-            processes: [
-                {
-                    name: "mctp_shutdown_peer_process",
-                    ram_size_bytes: 16384,
-                    objects: [],
-                    threads: [
-                        {
-                            name: "mctp_shutdown_peer_thread",
-                            kernel_stack_size_bytes: 2048,
-                        },
-                    ],
-                },
-            ],
-        },
     ],
 }

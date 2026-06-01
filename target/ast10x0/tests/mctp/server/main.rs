@@ -59,6 +59,7 @@ use userspace::time::{Clock, Duration, Instant, SystemClock};
 
 use app_mctp_server::handle;
 
+
 const OWN_EID: u8 = 8;
 const OWN_I2C_ADDR: u8 = 0x10;
 const REMOTE_I2C_ADDR: u8 = 0x42;
@@ -133,6 +134,7 @@ fn mctp_server_loop() -> Result<()> {
                         handle::MCTP,
                         &response_buf[..openprot_mctp_api::wire::MctpResponseHeader::SIZE],
                     );
+                    let _ = syscall::wait_group_add(handle::WG, handle::MCTP, Signals::READABLE, 0usize);
                 }
                 continue;
             }
@@ -176,15 +178,25 @@ fn mctp_server_loop() -> Result<()> {
                     });
                     syscall::channel_respond(handle::MCTP, &response_buf[..response_len])?;
                     pending_recv = None;
+                    syscall::wait_group_add(handle::WG, handle::MCTP, Signals::READABLE, 0usize)?;
                 }
             }
         } else {
             // IPC from a client — channel_read is non-blocking here because
             // the WaitGroup only fires after READABLE is set.
-            if pending_recv.is_some() {
-                pw_log::warn!("mctp_server: READABLE re-fired with pending_recv active — kernel holds signal until channel_respond");
-            }
             let len = syscall::channel_read(handle::MCTP, 0, &mut request_buf)?;
+            if pending_recv.is_some() {
+                // A blocking recv is in flight; reject the new caller so the
+                // kernel clears READABLE and stops re-firing this branch.
+                let resp = openprot_mctp_api::wire::MctpResponseHeader::error(ResponseCode::InternalError);
+                response_buf[..openprot_mctp_api::wire::MctpResponseHeader::SIZE]
+                    .copy_from_slice(&resp.to_bytes());
+                syscall::channel_respond(
+                    handle::MCTP,
+                    &response_buf[..openprot_mctp_api::wire::MctpResponseHeader::SIZE],
+                )?;
+                continue;
+            }
 
             if len < MctpRequestHeader::SIZE {
                 // Truncated request — respond with error
@@ -246,11 +258,13 @@ fn mctp_server_loop() -> Result<()> {
                                 .checked_add_duration(Duration::from_millis(timeout_millis as i64))
                                 .unwrap_or(Instant::MAX)
                         };
-                        // No message yet — defer the response until a message arrives or the deadline expires.
+                        // No message yet — remove MCTP from WaitGroup so the fast-path cannot
+                        // re-fire while READABLE stays asserted on the open transaction.
                         pending_recv = Some(PendingRecv {
                             handle: recv_handle,
                             deadline,
                         });
+                        let _ = syscall::wait_group_remove(handle::WG, handle::MCTP);
                     }
                 }
             } else {
