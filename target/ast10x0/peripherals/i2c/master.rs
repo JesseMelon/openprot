@@ -387,7 +387,12 @@ impl<Y: FnMut(u32)> Ast1060I2c<'_, Y> {
             }
 
             self.completion = true;
-            self.clear_interrupts(constants::AST_I2CM_PKT_DONE);
+            // Clear every bit that was set in the observed status. PKT_DONE alone
+            // is not enough: PKT_ERROR | TX_NAK | NORMAL_STOP all keep the IRQ
+            // line asserted on a NAK'd packet, and the IRQ line is shared with
+            // the slave path, causing the slave-IRQ wake loop in server-runtime
+            // to storm. (Bits are write-1-to-clear.)
+            self.clear_interrupts(status);
 
             // Check for errors
             if status & constants::AST_I2CM_PKT_ERROR != 0 {

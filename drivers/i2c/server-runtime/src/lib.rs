@@ -24,7 +24,7 @@
 
 #![no_std]
 
-use i2c_api::seam::{I2c, I2cBusRecovery, I2cSlaveBuffer, I2cSlaveEvent, I2cSEvent, SevenBitAddress};
+use i2c_api::seam::{I2c, I2cBusRecovery, I2cSlaveBuffer, I2cSlaveCore, I2cSlaveEvent, I2cSEvent, SevenBitAddress};
 use i2c_api::{I2cError, I2cOp, I2cRequestHeader, I2cResponseHeader, SlaveEventKind, MAX_PAYLOAD_SIZE};
 use i2c_server::slave::dispatch_slave;
 use i2c_server::{dispatch, MAX_BUF_SIZE};
@@ -93,7 +93,11 @@ fn header(req: &[u8]) -> Option<(I2cOp, usize)> {
 /// with `wg`, then loops. `buses` must be non-empty with distinct channels.
 pub fn run<B>(wg: u32, irq_signals: Signals, buses: &mut [Bus<B>]) -> !
 where
-    B: I2c<SevenBitAddress> + I2cSlaveBuffer<SevenBitAddress> + I2cSlaveEvent + I2cBusRecovery,
+    B: I2c<SevenBitAddress>
+        + I2cSlaveBuffer<SevenBitAddress>
+        + I2cSlaveCore<SevenBitAddress>
+        + I2cSlaveEvent
+        + I2cBusRecovery,
 {
     for bus in buses.iter() {
         if let Err(_) = syscall::wait_group_add(wg, bus.channel, Signals::READABLE, bus.channel as usize) {
@@ -155,7 +159,8 @@ where
                             }
                         }
                         Ok(None) => {
-                            pw_log::debug!("slave IRQ fired but no data ready — spurious or non-data event");
+                            // Spurious/non-data event. Silenced — see DIAG instrumentation
+                            // in slave.rs `handle_slave_interrupt` for diagnostics.
                         }
                         Err(_) => {
                             pw_log::error!("try_next_slave_event failed");
@@ -165,11 +170,12 @@ where
                 if let Err(_) = syscall::interrupt_ack(irq, acked) {
                     pw_log::error!("interrupt_ack failed");
                 }
-                // Wake client on data events (DataReceived with bytes) or transaction
-                // boundaries (Stop). ReadRequest without data is deferred (post-demo).
-                let should_wake = bus.notif_enabled && (
-                    bus.rx_len > 0 || bus.rx_event_kind == SlaveEventKind::Stop
-                );
+                // Wake client only when there is data to deliver. Non-data events
+                // (Stop, ReadRequest) are not consumed by the current client and
+                // would surface as `NoData` on the next `SlaveReceive`, producing
+                // spurious `slave_receive failed` logs. Defer non-data wake until
+                // the client has a use for them (post-demo).
+                let should_wake = bus.notif_enabled && bus.rx_len > 0;
                 if should_wake {
                     // ORs USER onto the bus channel without disturbing READABLE.
                     if let Err(_) = syscall::object_set_peer_user_signal(bus.channel, true) {
@@ -216,7 +222,17 @@ where
                 n
             }
             Some((I2cOp::ConfigureSlave | I2cOp::EnableSlave | I2cOp::DisableSlave, _)) => {
-                dispatch_slave(&mut bus.driver, req, &mut response_buf)
+                let n = dispatch_slave(&mut bus.driver, req, &mut response_buf);
+                // DIAG: confirm the driver actually has the address we think.
+                let enabled = bus.driver.is_slave_mode_enabled();
+                let addr = bus.driver.slave_address().unwrap_or(0xFF);
+                pw_log::info!(
+                    "DIAG slave-cfg ch={} enabled={} addr=0x{:02x}",
+                    bus.channel as u32,
+                    enabled as u32,
+                    addr as u32
+                );
+                n
             }
             Some((I2cOp::EnableSlaveNotification, _)) => {
                 bus.notif_enabled = true;
@@ -230,6 +246,11 @@ where
                 encode_ok(&mut response_buf, 0)
             }
             Some((I2cOp::SlaveReceive, max_len)) => {
+                // The client has consumed (or attempted to consume) the wake; deassert
+                // USER on the bus channel so the next WaitGroup fire requires a new
+                // hardware event. Without this, USER stays sticky and the client spins
+                // here returning NoData on every wake.
+                let _ = syscall::object_set_peer_user_signal(bus.channel, false);
                 if bus.rx_len == 0 {
                     encode_error(&mut response_buf, I2cError::NoData)
                 } else {

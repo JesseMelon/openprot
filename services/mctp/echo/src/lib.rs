@@ -80,8 +80,33 @@ pub fn run_with_peer_round_trip_limit<C: MctpClient, L: openprot_mctp_api::MctpL
 ) -> ! {
     let mut buf = [0u8; 255];
     let mut iteration: u32 = 0;
-    let mut completed_round_trips: u32 = 0;
     let send_interval = 10; // Send every 10 iterations
+
+    // Keep retrying until the first successful round-trip so a slow-booting
+    // peer (>1 min) does not cause us to give up before it is ready.
+    loop {
+        match listener.recv(&mut buf) {
+            Ok((_meta, msg, mut resp)) => {
+                let _ = resp.send(msg);
+            }
+            Err(e) => {
+                if e.code as u32 != 4 {
+                    pw_log::error!("echo recv failed: code={}", e.code as u32);
+                }
+            }
+        }
+
+        if let Ok(mut req) = stack.req(peer_eid, 10000) {
+            let test_msg = b"echo_test";
+            let _ = req.send(ECHO_MSG_TYPE, test_msg);
+            if req.recv(&mut buf).is_ok() {
+                break;
+            }
+        }
+    }
+
+    // First round-trip succeeded; count it and continue with periodic sends.
+    let mut completed_round_trips: u32 = 1;
 
     loop {
         iteration = iteration.wrapping_add(1);

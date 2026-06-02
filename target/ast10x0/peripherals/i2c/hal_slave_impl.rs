@@ -126,6 +126,7 @@ impl<Y: FnMut(u32)> Ast1060I2c<'_, Y> {
         let len = rx_len(ev).unwrap_or(0);
         Ok(Some((kind, len)))
     }
+
 }
 
 impl<Y: FnMut(u32)> I2cBusRecovery for Ast1060I2c<'_, Y> {

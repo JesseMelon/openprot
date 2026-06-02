@@ -94,11 +94,25 @@ fn mctp_server_loop() -> Result<()> {
             match i2c_rx_client.slave_receive(&mut i2c_rx_buf) {
                 Ok(event) => {
                     if event.kind == SlaveEventKind::DataReceived && event.data_len > 0 {
+                        let n = event.data_len.min(16);
+                        let mut b = [0u32; 16];
+                        for i in 0..n { b[i] = i2c_rx_buf[i] as u32; }
+                        pw_log::info!(
+                            "DIAG rx len={} src=0x{:02x} bytes={:02x} {:02x} {:02x} {:02x} {:02x} {:02x} {:02x} {:02x} {:02x} {:02x} {:02x} {:02x} {:02x} {:02x} {:02x} {:02x}",
+                            event.data_len as u32, event.source_address as u32,
+                            b[0] as u32, b[1] as u32, b[2] as u32, b[3] as u32,
+                            b[4] as u32, b[5] as u32, b[6] as u32, b[7] as u32,
+                            b[8] as u32, b[9] as u32, b[10] as u32, b[11] as u32,
+                            b[12] as u32, b[13] as u32, b[14] as u32, b[15] as u32
+                        );
                         if let Ok((pkt, _)) = i2c_receiver.decode(&i2c_rx_buf[..event.data_len]) {
+                            pw_log::info!("DIAG rx decode OK");
                             let _ = server.inbound(pkt);
                         } else {
                             pw_log::error!("i2c frame decode failed");
                         }
+                    } else {
+                        pw_log::info!("DIAG rx event kind={} len={}", event.kind as u32, event.data_len as u32);
                     }
                 }
                 Err(_) => {

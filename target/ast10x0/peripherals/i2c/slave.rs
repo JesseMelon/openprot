@@ -250,6 +250,14 @@ impl<Y: FnMut(u32)> Ast1060I2c<'_, Y> {
         // Enable slave interrupts
         self.enable_slave_interrupts();
 
+        // Restore master mode — the AST1060 supports concurrent master+slave
+        // operation. The momentary disable above was the old "slave gate" approach;
+        // runtime coexistence is now handled by the TX_ACK workaround (i2cs28 pulse
+        // in master.rs). Re-enable master so subsequent writes are not blocked.
+        self.regs()
+            .i2cc00()
+            .modify(|_, w| w.enbl_master_fn().set_bit());
+
         Ok(())
     }
 
@@ -464,6 +472,17 @@ impl<Y: FnMut(u32)> Ast1060I2c<'_, Y> {
         let status = self.regs().i2cs24().read().bits();
 
         if status == 0 {
+            // Slave is clean but the shared IRQ line still fired — the source
+            // must be leftover bits on the master status register (i2cm14).
+            // Master operations run synchronously in the dispatch path, never
+            // concurrently with this IRQ handler, so clearing m14 here is safe
+            // and prevents the IRQ from re-asserting in a tight loop.
+            let m14 = self.regs().i2cm14().read().bits();
+            if m14 != 0 {
+                unsafe {
+                    self.regs().i2cm14().write(|w| w.bits(m14));
+                }
+            }
             return None;
         }
 
@@ -573,6 +592,13 @@ impl<Y: FnMut(u32)> Ast1060I2c<'_, Y> {
                 }
                 return Some(SlaveEvent::Stop);
             } else {
+                // Unmatched packet-mode status. PKT_DONE was already cleared
+                // above; clear the residual bits so the shared IRQ line drops.
+                // Without this, the bits stay asserted and the runtime spins on
+                // the IRQ signal. (write-1-to-clear)
+                unsafe {
+                    self.regs().i2cs24().write(|w| w.bits(sts));
+                }
                 // TODO packet slave sts
             }
         } else {
@@ -638,6 +664,12 @@ impl<Y: FnMut(u32)> Ast1060I2c<'_, Y> {
                 self.regs().i2cs28().write(|w| unsafe { w.bits(cmd) });
                 self.regs().i2cs24().write(|w| unsafe { w.bits(status) });
                 return Some(SlaveEvent::Stop);
+            }
+            // Unmatched byte-mode status (e.g. SLAVE_MATCH alone, observed at
+            // 0x80 on the wire). Nothing above cleared anything in this path —
+            // do it here so the IRQ deasserts. (write-1-to-clear)
+            unsafe {
+                self.regs().i2cs24().write(|w| w.bits(status));
             }
             // TODO byte slave sts
         }
