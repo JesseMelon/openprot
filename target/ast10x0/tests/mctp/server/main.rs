@@ -157,7 +157,15 @@ fn mctp_server_loop() -> Result<()> {
                             b[8] as u32, b[9] as u32, b[10] as u32, b[11] as u32,
                             b[12] as u32, b[13] as u32, b[14] as u32, b[15] as u32
                         );
-                        if let Ok((pkt, _)) = i2c_receiver.decode(&i2c_rx_buf[..event.data_len]) {
+                        // The i2c slave driver strips the dest-address byte that
+                        // SLAVE_PKT_SAVE_ADDR deposits at offset 0, but
+                        // MctpI2cEncap::decode expects the full SMBus frame
+                        // beginning with [dest<<1|W]. Re-prepend it here.
+                        let mut framed = [0u8; I2C_RX_MAX + 1];
+                        framed[0] = OWN_I2C_ADDR << 1;
+                        let flen = event.data_len + 1;
+                        framed[1..flen].copy_from_slice(&i2c_rx_buf[..event.data_len]);
+                        if let Ok((pkt, _)) = i2c_receiver.decode(&framed[..flen]) {
                             pw_log::info!("DIAG rx decode OK");
                             let _ = server.inbound(pkt);
                         } else {

@@ -141,12 +141,12 @@ where
                                         if n > 0 {
                                             bus.rx_len = n;
                                             // Source address extraction from MCTP-I2C header.
-                                            // With AST_I2CC_SLAVE_PKT_SAVE_ADDR set, the hardware
-                                            // prepends dest address at byte[0]; the MCTP-I2C header
-                                            // carries source at byte[3]: src_addr << 1 | 1.
-                                            // Extract it (bits 7:1 = 7-bit address).
-                                            if n > 3 {
-                                                bus.rx_source = (bus.rx[3] >> 1) & 0x7F;
+                                            // `slave_read` strips the dest-addr byte that
+                                            // SLAVE_PKT_SAVE_ADDR deposits at offset 0, so the
+                                            // returned buffer is [cmd][byte_count][src<<1|1][...].
+                                            // Source byte is at index 2; bits 7:1 = 7-bit address.
+                                            if n > 2 {
+                                                bus.rx_source = (bus.rx[2] >> 1) & 0x7F;
                                             } else {
                                                 bus.rx_source = 0xFF; // Invalid: message too short
                                             }
