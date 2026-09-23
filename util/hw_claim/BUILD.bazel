@@ -1,0 +1,23 @@
+# Licensed under the Apache-2.0 license
+# SPDX-License-Identifier: Apache-2.0
+
+load("@rules_rust//rust:defs.bzl", "rust_binary", "rust_library")
+
+package(default_visibility = ["//visibility:public"])
+
+exports_files(["linker_sections.ld.jinja"])
+
+rust_library(
+    name = "hw_claim",
+    srcs = ["lib.rs"],
+    crate_name = "util_hw_claim",
+    edition = "2024",
+    deps = ["//util/region"],
+)
+
+rust_binary(
+    name = "check",
+    srcs = ["check.rs"],
+    edition = "2024",
+    deps = ["@rust_crates//:object"],
+)
