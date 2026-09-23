@@ -15,7 +15,7 @@ use crate::smc::helpers::{
 use crate::smc::interrupts::{SmcInterrupt, SmcInterruptDecoder};
 use crate::smc::registers::SmcRegisters;
 use crate::smc::types::*;
-use util_region::{Region, RegionTag};
+use util_region::{Mmap, Region};
 use util_sfdp::{decode_geometry, FlashGeometry};
 
 /// Internal controller state
@@ -299,16 +299,16 @@ impl<I: SmcInstance> Smc<I, Uninitialized> {
         _cs1_window: Region<Cs1>,
     ) -> Result<Self, SmcError>
     where
-        Cs0: RegionTag,
-        Cs1: RegionTag,
+        Cs0: Mmap,
+        Cs1: Mmap,
     {
         const {
             assert!(
-                <I::Regs as RegionTag>::START == I::CONTROLLER.base_address(),
+                <I::Regs as Mmap>::START == I::CONTROLLER.base_address(),
                 "mapped region does not start at this controller's base address"
             );
             assert!(
-                <I::Regs as RegionTag>::LEN
+                <I::Regs as Mmap>::LEN
                     >= core::mem::size_of::<ast1060_pac::fmc::RegisterBlock>(),
                 "mapped region is shorter than this controller's register block"
             );

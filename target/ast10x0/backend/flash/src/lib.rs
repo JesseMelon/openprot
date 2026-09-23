@@ -18,16 +18,16 @@ use ast10x0_peripherals::smc::{
 };
 use hal_flash_driver::{FlashAddress, FlashDriver};
 use util_error::{self as error, ErrorCode};
-use util_region::{Region, RegionTag};
+use util_region::{Mmap, Region};
 use util_types::{Blocking, PowerOf2Usize};
 
 /// Compile-time descriptor for the wired FMC controller this backend drives.
 ///
 /// `R` names the register region the hosting process was granted, so the
 /// controller's base address comes from that image's `system.json5`.
-struct FmcInstance<R: RegionTag>(PhantomData<R>);
+struct FmcInstance<R: Mmap>(PhantomData<R>);
 
-impl<R: RegionTag> SmcInstance for FmcInstance<R> {
+impl<R: Mmap> SmcInstance for FmcInstance<R> {
     type Regs = R;
 
     const CONTROLLER: SmcController = SmcController::Fmc;
@@ -73,7 +73,7 @@ impl Blocking for NoWaitBlocking {
 }
 
 /// FMC flash driver.
-pub struct Ast10x0FmcFlashDriver<R: RegionTag> {
+pub struct Ast10x0FmcFlashDriver<R: Mmap> {
     fmc: FmcReady<FmcInstance<R>>,
     geometry: FlashGeometry,
 }
@@ -81,7 +81,7 @@ pub struct Ast10x0FmcFlashDriver<R: RegionTag> {
 /// Stable alias used by the server binary for compile-time backend selection.
 pub type Backend<R> = Ast10x0FmcFlashDriver<R>;
 
-impl<R: RegionTag> Ast10x0FmcFlashDriver<R> {
+impl<R: Mmap> Ast10x0FmcFlashDriver<R> {
     /// Initialize the FMC from the regions mapped to this process.
     ///
     /// Takes the register block and both CS decode windows, which `init` lights
@@ -97,8 +97,8 @@ impl<R: RegionTag> Ast10x0FmcFlashDriver<R> {
         cs1_window: Region<Cs1>,
     ) -> Result<Self, ErrorCode>
     where
-        Cs0: RegionTag,
-        Cs1: RegionTag,
+        Cs0: Mmap,
+        Cs1: Mmap,
     {
         let uninit = FmcUninit::<FmcInstance<R>>::new(regs, cs0_window, cs1_window)
             .map_err(map_smc_error)?;
@@ -120,7 +120,7 @@ impl<R: RegionTag> Ast10x0FmcFlashDriver<R> {
     }
 }
 
-impl<R: RegionTag> FlashDriver for Ast10x0FmcFlashDriver<R> {
+impl<R: Mmap> FlashDriver for Ast10x0FmcFlashDriver<R> {
     type Error = ErrorCode;
 
     // PAGE_SIZE / PROGRAM_WINDOW_SIZE are defaulted to 0, geometry is discovered instead

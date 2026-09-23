@@ -4,7 +4,7 @@
 //! Type definitions and error handling
 
 use embedded_storage::nor_flash::{NorFlashError, NorFlashErrorKind};
-use util_region::RegionTag;
+use util_region::Mmap;
 
 use crate::smc::controller::GeometrySource;
 
@@ -287,7 +287,7 @@ pub trait SmcInstance {
     /// Owning [`Region<Self::Regs>`](util_region::Region) is what authorizes
     /// touching the hardware, and its `START` is checked against
     /// [`Self::CONTROLLER`]'s base address at compile time.
-    type Regs: RegionTag;
+    type Regs: Mmap;
     /// How CS0's geometry is resolved at init: [`Discover`] to read SFDP, or a
     /// target-defined [`GeometrySource`] returning a fixed geometry. Only
     /// consulted when `CONFIG.cs0` is `Some`. Defaults to [`Discover`].

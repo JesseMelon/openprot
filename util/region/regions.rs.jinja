@@ -6,11 +6,11 @@
 #![no_std]
 
 #[allow(unused_imports)]
-use util_region::{Region, RegionTag};
-{% for m in process.memory_mappings %}{% if m["type"] == "device" %}{% set tag = m.name | replace("_", " ") | title | replace(" ", "") %}
-pub struct {{tag}};
+use util_region::{Mmap, Region};
+{% for m in process.memory_mappings %}{% if m["type"] == "device" %}{% set mmap = m.name | replace("_", " ") | title | replace(" ", "") %}
+pub struct {{mmap}};
 
-impl RegionTag for {{tag}} {
+impl Mmap for {{mmap}} {
     const START: usize = {{m.start_address | hex}};
     const LEN: usize = {{m.size_bytes | hex}};
 }

@@ -10,8 +10,8 @@
 
 use core::marker::PhantomData;
 
-/// Address range of one granted region, generated from the system manifest.
-pub trait RegionTag {
+/// Address range of one memory mapping, generated from the system manifest.
+pub trait Mmap {
     const START: usize;
     const LEN: usize;
 }
@@ -20,9 +20,9 @@ pub trait RegionTag {
 ///
 /// Move-only, so handing it to a driver transfers sole access and a second
 /// claim is a compile error rather than an aliasing hazard.
-pub struct Region<T: RegionTag>(PhantomData<T>);
+pub struct Region<T: Mmap>(PhantomData<T>);
 
-impl<T: RegionTag> Region<T> {
+impl<T: Mmap> Region<T> {
     /// # Safety
     /// Mints ownership of `T`'s address range from nothing. Only the generated
     /// per-process mapping table may call this, and only once.

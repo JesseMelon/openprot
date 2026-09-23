@@ -16,7 +16,7 @@
 //!
 //! See [`crate::smc`] module-level documentation for the full taxonomy.
 
-use util_region::{Region, RegionTag};
+use util_region::{Mmap, Region};
 
 use crate::smc::controller::{Cs, ReadySmc, UninitSmc};
 use crate::smc::types::{SmcController, SmcError, SmcInstance};
@@ -43,8 +43,8 @@ impl<I: SmcInstance> FmcUninit<I> {
         cs1_window: Region<Cs1>,
     ) -> Result<Self, SmcError>
     where
-        Cs0: RegionTag,
-        Cs1: RegionTag,
+        Cs0: Mmap,
+        Cs1: Mmap,
     {
         const {
             assert!(

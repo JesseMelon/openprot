@@ -17,7 +17,7 @@
 //! For BootSpi (FMC), use the [`crate::smc::fmc`] wrapper.
 //! For HostSpi/NormalSpi (SPI1/SPI2), use this wrapper.
 
-use util_region::{Region, RegionTag};
+use util_region::{Mmap, Region};
 
 use crate::smc::controller::{Cs, ReadySmc, UninitSmc};
 use crate::smc::types::{SmcController, SmcError, SmcInstance};
@@ -57,8 +57,8 @@ impl<I: SmcInstance> SpiUninit<I> {
         cs1_window: Region<Cs1>,
     ) -> Result<Self, SmcError>
     where
-        Cs0: RegionTag,
-        Cs1: RegionTag,
+        Cs0: Mmap,
+        Cs1: Mmap,
     {
         // The SPI wrapper is specialized for HostSpi and NormalSpi topologies.
         // FMC (BootSpi topology) uses the FMC wrapper. Enforce that here.
