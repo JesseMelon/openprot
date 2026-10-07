@@ -31,7 +31,7 @@
 #![no_std]
 
 use echo_task::{MSG_TYPE_PLDM, MSG_TYPE_SPDM};
-use openprot_mctp_api::wire::MAX_PAYLOAD_SIZE;
+use mctp_lib::config;
 use openprot_mctp_api::{MctpReqChannel, Stack};
 use openprot_mctp_client_ipc::IpcMctpClient;
 use pw_status::Error;
@@ -103,7 +103,7 @@ fn run() -> Result<(), ()> {
             pw_log::error!("harness: req(unserved) code={}", e.code as u32);
         })?;
         send(&mut unserved, MSG_TYPE_UNSERVED, b"X3")?;
-        let mut buf = [0u8; MAX_PAYLOAD_SIZE];
+        let mut buf = [0u8; config::MAX_PAYLOAD];
         match unserved.recv(&mut buf) {
             Err(e) if e.is_timeout() => {}
             Err(e) => {
@@ -135,7 +135,7 @@ fn send<R: MctpReqChannel>(req: &mut R, msg_type: u8, payload: &[u8]) -> Result<
 
 /// Block for the echo of `payload` on `req` and check its header and body.
 fn expect_echo<R: MctpReqChannel>(req: &mut R, msg_type: u8, payload: &[u8]) -> Result<(), ()> {
-    let mut buf = [0u8; MAX_PAYLOAD_SIZE];
+    let mut buf = [0u8; config::MAX_PAYLOAD];
     let (meta, echoed) = req.recv(&mut buf).map_err(|e| {
         pw_log::error!("FAIL: recv type {} code={}", msg_type as u32, e.code as u32);
     })?;

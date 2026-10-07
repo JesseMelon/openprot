@@ -20,7 +20,7 @@
 
 #![no_std]
 
-use openprot_mctp_api::wire::MAX_PAYLOAD_SIZE;
+use mctp_lib::config;
 use openprot_mctp_api::{MctpListener, MctpRespChannel, Stack};
 use openprot_mctp_client_ipc::IpcMctpClient;
 use pw_status::Error;
@@ -51,7 +51,7 @@ pub fn serve(channel: u32, ctl: u32, msg_type: u8) -> ! {
     pw_log::info!("echo {}: listening", msg_type as u32);
     ready(ctl, msg_type);
 
-    let mut buf = [0u8; MAX_PAYLOAD_SIZE];
+    let mut buf = [0u8; config::MAX_PAYLOAD];
     loop {
         match listener.recv(&mut buf) {
             Ok((meta, msg, mut resp)) => {

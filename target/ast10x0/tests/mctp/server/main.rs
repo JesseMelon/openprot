@@ -19,7 +19,7 @@
 use i2c_api::SlaveEvent;
 use i2c_client::I2cClient;
 use i2c_client_ipc::IpcTransport;
-use openprot_mctp_api::wire::MAX_PAYLOAD_SIZE;
+use mctp_lib::config;
 use openprot_mctp_server::Server;
 use openprot_mctp_transport_i2c::{I2cSender, MctpI2cReceiver};
 
@@ -34,7 +34,7 @@ use app_mctp_server::handle;
 const OWN_EID: u8 = 8;
 const OWN_I2C_ADDR: u8 = 0x10;
 const REMOTE_I2C_ADDR: u8 = 0x42;
-const I2C_RX_MAX: usize = MAX_PAYLOAD_SIZE;
+const I2C_RX_MAX: usize = config::MAX_PAYLOAD;
 
 // ---------------------------------------------------------------------------
 // Server loop

@@ -92,6 +92,7 @@ rust_library(
         "@pigweed//pw_kernel/userspace",
         "@pigweed//pw_log/rust:pw_log",
         "@pigweed//pw_status/rust:pw_status",
+        "@rust_crates//:mctp-lib",
     ],
 )
 
@@ -141,6 +142,7 @@ rust_app(
         "@pigweed//pw_kernel/userspace",
         "@pigweed//pw_log/rust:pw_log",
         "@pigweed//pw_status/rust:pw_status",
+        "@rust_crates//:mctp-lib",
     ],
 )
 

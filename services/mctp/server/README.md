@@ -37,6 +37,9 @@ Pigweed kernel loop that wraps this crate.
 
 - **No heap, no OS primitives.** `#![no_std]`; `MAX_LISTENERS`/`MAX_REQUESTS`/
   `MAX_OUTSTANDING` (`ServerConfig`) bound all allocation via `heapless`.
+- **Payload limit is stack-configured.** `ServerConfig::MAX_PAYLOAD` is sourced
+  from `mctp-estack` via `mctp_lib::config::MAX_PAYLOAD` (tune with
+  `MCTP_ESTACK_MAX_MESSAGE` at build time).
 - **One response buffer, reused per call.** `drive_pending`'s `on_ready`
   callback must send `response_bytes` before returning — the buffer is
   overwritten for the next ready handle.

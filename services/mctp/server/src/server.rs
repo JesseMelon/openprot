@@ -26,13 +26,8 @@
 
 use heapless::LinearMap;
 use mctp::{Eid, MsgIC, MsgType, Tag, TagValue};
-use mctp_lib::{AppCookie, Router, Sender};
+use mctp_lib::{config, AppCookie, MctpMessage, Router, Sender};
 use openprot_mctp_api::{Handle, MctpError, RecvMetadata, ResponseCode};
-
-/// Maximum payload size in bytes.
-// TODO: Use configuration from mctp-lib (mctp-estack)
-//       see https://github.com/OpenPRoT/mctp-lib/issues/4
-const MAX_PAYLOAD: usize = openprot_mctp_api::wire::MAX_PAYLOAD_SIZE;
 
 /// Configuration constants for the MCTP server.
 pub struct ServerConfig;
@@ -44,8 +39,8 @@ impl ServerConfig {
     pub const MAX_LISTENERS: usize = 8;
     /// Maximum number of concurrent outstanding receive calls.
     pub const MAX_OUTSTANDING: usize = 16;
-    /// Maximum payload size in bytes.
-    pub const MAX_PAYLOAD: usize = MAX_PAYLOAD;
+    /// Maximum payload size in bytes, defined by `mctp-estack` config.
+    pub const MAX_PAYLOAD: usize = config::MAX_PAYLOAD;
 }
 
 /// A pending receive call waiting for a message or timeout.
@@ -126,18 +121,7 @@ impl<S: Sender, const OUTSTANDING: usize> Server<S, OUTSTANDING> {
         let cookie = AppCookie(handle.0 as usize);
         let msg = self.stack.recv(cookie)?;
 
-        let payload_len = msg.payload.len();
-        if payload_len <= buf.len() {
-            buf[..payload_len].copy_from_slice(msg.payload);
-        }
-
-        Some(RecvMetadata {
-            msg_type: msg.typ.0,
-            msg_ic: msg.ic.0,
-            msg_tag: msg.tag.tag().0,
-            remote_eid: msg.source.0,
-            payload_size: payload_len,
-        })
+        Some(recv_metadata_from_msg(&msg, buf))
     }
 
     /// Register a pending receive call for the given handle.
@@ -216,7 +200,7 @@ impl<S: Sender, const OUTSTANDING: usize> Server<S, OUTSTANDING> {
         ic: bool,
         buf: &[u8],
     ) -> Result<u8, MctpError> {
-        if buf.len() > MAX_PAYLOAD {
+        if buf.len() > ServerConfig::MAX_PAYLOAD {
             return Err(MctpError::from_code(ResponseCode::NoSpace));
         }
 
@@ -267,17 +251,7 @@ impl<S: Sender, const OUTSTANDING: usize> Server<S, OUTSTANDING> {
 
             // Check if a message arrived for this handle
             if let Some(mctp_msg) = self.stack.recv(cookie) {
-                let payload_len = mctp_msg.payload.len();
-                if payload_len <= recv_buf.len() {
-                    recv_buf[..payload_len].copy_from_slice(mctp_msg.payload);
-                }
-                let metadata = RecvMetadata {
-                    msg_type: mctp_msg.typ.0,
-                    msg_ic: mctp_msg.ic.0,
-                    msg_tag: mctp_msg.tag.tag().0,
-                    remote_eid: mctp_msg.source.0,
-                    payload_size: payload_len,
-                };
+                let metadata = recv_metadata_from_msg(&mctp_msg, recv_buf);
                 let _ = ready.push((handle, RecvResult::Message(metadata)));
                 continue;
             }
@@ -325,6 +299,22 @@ pub enum RecvResult {
     Message(RecvMetadata),
     /// The receive call timed out.
     TimedOut,
+}
+
+/// Build receive metadata and copy payload into `buf` when it fits.
+fn recv_metadata_from_msg(msg: &MctpMessage<'_>, buf: &mut [u8]) -> RecvMetadata {
+    let payload_len = msg.payload.len();
+    if payload_len <= buf.len() {
+        buf[..payload_len].copy_from_slice(msg.payload);
+    }
+
+    RecvMetadata {
+        msg_type: msg.typ.0,
+        msg_ic: msg.ic.0,
+        msg_tag: msg.tag.tag().0,
+        remote_eid: msg.source.0,
+        payload_size: payload_len,
+    }
 }
 
 /// Map mctp::Error to our MctpError.

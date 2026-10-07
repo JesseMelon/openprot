@@ -19,7 +19,8 @@
 
 #![no_std]
 
-use openprot_mctp_api::wire::{self, MAX_PAYLOAD_SIZE, MAX_REQUEST_SIZE, MAX_RESPONSE_SIZE};
+use mctp_lib::config;
+use openprot_mctp_api::wire::{self, MctpRequestHeader, MctpResponseHeader};
 use openprot_mctp_api::ResponseCode;
 use openprot_mctp_server::dispatch::{self, DispatchOutcome};
 use openprot_mctp_server::{Sender, Server};
@@ -29,6 +30,10 @@ use userspace::time::{Clock, Duration, Instant, SystemClock};
 use util_service::{ChannelId, Event, ServiceLoop};
 
 pub use util_service::Channel;
+
+const STACK_MAX_PAYLOAD_SIZE: usize = config::MAX_PAYLOAD;
+const MAX_REQUEST_SIZE: usize = MctpRequestHeader::SIZE + STACK_MAX_PAYLOAD_SIZE;
+const MAX_RESPONSE_SIZE: usize = MctpResponseHeader::SIZE + STACK_MAX_PAYLOAD_SIZE;
 
 /// Run the MCTP IPC dispatch loop until a fatal error.
 ///
@@ -76,7 +81,7 @@ pub fn run<S: Sender, const N: usize>(
     let epoch = Epoch::now();
     let mut request_buf = [0u8; MAX_REQUEST_SIZE];
     let mut response_buf = [0u8; MAX_RESPONSE_SIZE];
-    let mut recv_buf = [0u8; MAX_PAYLOAD_SIZE];
+    let mut recv_buf = [0u8; STACK_MAX_PAYLOAD_SIZE];
 
     loop {
         // The server is the single owner of when a deferred Recv is due.
