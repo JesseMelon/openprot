@@ -2,7 +2,7 @@
 # SPDX-License-Identifier: Apache-2.0
 
 load("@rules_rust//rust:defs.bzl", "rust_library", "rust_test")
-load("//target/ast10x0:defs.bzl", "TARGET_COMPATIBLE_WITH")
+load("//target/ast10x0:defs.bzl", "HOST_ONLY_COMPATIBLE_WITH", "TARGET_COMPATIBLE_WITH")
 
 package(default_visibility = ["//visibility:public"])
 
@@ -122,10 +122,7 @@ rust_test(
     crate_name = "otp_test",
     crate_root = "otp/mod.rs",
     edition = "2024",
-    target_compatible_with = [
-        "@platforms//cpu:x86_64",
-        "@platforms//os:linux",
-    ],
+    target_compatible_with = HOST_ONLY_COMPATIBLE_WITH,
     deps = [
         "@ast1060_pac",
         "@rust_crates//:embedded-hal",
@@ -139,8 +136,5 @@ rust_test(
     crate_name = "spimonitor_commands_test",
     edition = "2024",
     tags = ["do_not_build"],
-    target_compatible_with = [
-        "@platforms//cpu:x86_64",
-        "@platforms//os:linux",
-    ],
+    target_compatible_with = HOST_ONLY_COMPATIBLE_WITH,
 )

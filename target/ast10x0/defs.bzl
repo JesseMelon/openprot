@@ -9,6 +9,16 @@ TARGET_COMPATIBLE_WITH = select({
     "//conditions:default": ["@platforms//:incompatible"],
 })
 
+# For a plain host binary (e.g. a manifest checker or a unit test for chip-specific logic that
+# doesn't need real hardware) that lives under target/ast10x0/ for organizational reasons. Only
+# incompatible with the one platform it actually can't run on — the embedded ast10x0 target —
+# rather than naming the host platforms it can run on, so it isn't skipped on a developer machine
+# this repo just hasn't been built on yet (e.g. native ARM, or Windows outside WSL).
+HOST_ONLY_COMPATIBLE_WITH = select({
+    "//target/ast10x0:target_ast10x0": ["@platforms//:incompatible"],
+    "//conditions:default": [],
+})
+
 def _system_image_test_impl(ctx):
     image_info = ctx.attr.image[SystemImageInfo]
     executable_symlink = ctx.actions.declare_file(ctx.label.name)
