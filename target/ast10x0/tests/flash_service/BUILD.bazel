@@ -136,3 +136,97 @@ rust_binary_no_panics_test(
     binary = ":flash",
     tags = ["kernel"],
 )
+
+# ── Concurrency variant ─────────────────────────────────────────────────────
+# Same server, a client with two threads: one erases on one chip select while
+# the other reads and programs the other, and checks the reads landed inside
+# the erase windows. Hardware only: QEMU's flash model erases instantly, so
+# there is no window to land in.
+
+filegroup(
+    name = "system_concurrent_config",
+    srcs = ["system_concurrent.json5"],
+)
+
+target_codegen(
+    name = "codegen_concurrent",
+    arch = "@pigweed//pw_kernel/arch/arm_cortex_m:arch_arm_cortex_m",
+    crate_name = "codegen",
+    system_config = ":system_concurrent_config",
+    target_compatible_with = TARGET_COMPATIBLE_WITH,
+)
+
+target_linker_script(
+    name = "linker_script_concurrent",
+    system_config = ":system_concurrent_config",
+    tags = ["kernel"],
+    target_compatible_with = TARGET_COMPATIBLE_WITH,
+    template = "//target/ast10x0:linker_script_template",
+)
+
+rust_binary(
+    name = "target_concurrent",
+    srcs = ["target.rs"],
+    edition = "2024",
+    tags = ["kernel"],
+    target_compatible_with = TARGET_COMPATIBLE_WITH,
+    deps = [
+        ":codegen_concurrent",
+        ":linker_script_concurrent",
+        "//target/ast10x0:entry",
+        "//target/ast10x0/peripherals",
+        "@pigweed//pw_kernel/arch/arm_cortex_m:arch_arm_cortex_m",
+        "@pigweed//pw_kernel/kernel",
+        "@pigweed//pw_kernel/subsys/console:console_backend",
+        "@pigweed//pw_kernel/target:target_common",
+        "@pigweed//pw_kernel/userspace",
+    ],
+)
+
+rust_app(
+    name = "flash_concurrent_client_app",
+    srcs = ["concurrent_client_main.rs"],
+    codegen_crate_name = "app_flash_client",
+    edition = "2024",
+    tags = ["kernel"],
+    target_compatible_with = TARGET_COMPATIBLE_WITH,
+    deps = [
+        "//hal/blocking/flash",
+        "//services/flash/client-ipc:flash_client_ipc",
+        "//util/ipc",
+        "//util/types",
+        "@pigweed//pw_kernel/userspace",
+        "@pigweed//pw_log/rust:pw_log",
+        "@pigweed//pw_status/rust:pw_status",
+    ],
+)
+
+system_image(
+    name = "flash_concurrent",
+    apps = [
+        ":flash_server_bin",
+        ":flash_concurrent_client_app",
+    ],
+    kernel = ":target_concurrent",
+    platform = "//target/ast10x0",
+    system_config = ":system_concurrent_config",
+    tags = ["kernel"],
+    target_compatible_with = TARGET_COMPATIBLE_WITH,
+)
+
+#   AST1060_EVB_PI_HOST=<pi_host> bazel test --config=k_ast1060_evb //target/ast10x0/tests/flash_service:flash_concurrent_evb_test
+system_image_test(
+    name = "flash_concurrent_evb_test",
+    image = ":flash_concurrent",
+    tags = ["hardware"],
+    target_compatible_with = select({
+        "//target/ast10x0:qemu_enabled": ["@platforms//:incompatible"],
+        "//conditions:default": [],
+    }),
+)
+
+rust_binary_no_panics_test(
+    name = "concurrent_no_panics_test",
+    binary = ":flash_concurrent",
+    tags = ["kernel"],
+)

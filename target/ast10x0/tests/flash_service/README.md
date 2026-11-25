@@ -45,3 +45,21 @@ AST1060_EVB_PI_HOST=<pi_host> bazel test --config=k_ast1060_evb //target/ast10x0
 ```
 
 See [`../README.md`](../README.md) for the fixture setup.
+
+## Concurrency variant
+
+`flash_concurrent` is the same image with a client process of two threads, and
+checks that an erase on one chip select does not block the other. One thread
+erases a backed-up sector on one chip select eight times and records each
+erase's start and end. Meanwhile the main thread reads a fixed region of the
+other chip select in a loop, verifying every read against a snapshot and
+recording when it completed, and programs pages of a freshly erased sector on
+that same chip select. The test passes only if reads completed inside every
+erase window and at least one program did too, which a server that blocks for
+the whole erase cannot produce. It runs both directions and restores every
+sector it erased. It is hardware only: QEMU's flash model erases instantly, so
+there is no window to land in.
+
+```
+AST1060_EVB_PI_HOST=<pi_host> bazel test --config=k_ast1060_evb //target/ast10x0/tests/flash_service:flash_concurrent_evb_test
+```
